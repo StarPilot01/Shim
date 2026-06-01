@@ -2053,7 +2053,12 @@ async function renderMermaidBlocks() {
     return;
   }
   if (!renderMermaidBlocks.initialized) {
-    mermaid.initialize({ startOnLoad: false, theme: "base", securityLevel: "strict" });
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: "base",
+      securityLevel: "strict",
+      flowchart: { useMaxWidth: false }
+    });
     renderMermaidBlocks.initialized = true;
   }
   for (const target of targets) {

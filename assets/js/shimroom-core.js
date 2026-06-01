@@ -1,6 +1,6 @@
 ﻿const STORAGE_KEY = "shimroom-plan-tool-state-v1";
 const CURRENT_SCHEMA_VERSION = 3;
-const DEFAULT_APP_TITLE = "쉼표의 방 통합 기획서 툴";
+const DEFAULT_APP_TITLE = "Shim/GDD";
 const LEGACY_OUTING_TERM = "\uc678\ucd9c";
 let state = loadState();
 let currentTabId = state.tabs[0]?.id || "";
