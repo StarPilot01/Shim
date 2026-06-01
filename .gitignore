@@ -1,0 +1,12 @@
+# Local agent/project instructions
+AGENTS.md
+
+# Source documents and spreadsheets that are not required by the hosted app
+*.doc
+*.docx
+*.xls
+*.xlsx
+
+# Local test artifacts
+test-results/
+shimroom_test_runner.html

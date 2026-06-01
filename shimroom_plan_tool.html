@@ -1,0 +1,134 @@
+﻿<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>쉼표의 방 통합 기획서 툴</title>
+  <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    window.mermaid = mermaid;
+  </script>
+  <link rel="stylesheet" href="assets/css/shimroom.css?v=table-image-20260601">
+</head>
+<body class="view-mode">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">쉼</div>
+      <div>
+        <input id="appTitle" class="brand-title-input" aria-label="문서 전체 제목" placeholder="문서 제목" readonly>
+        <small id="saveStatus">초기화 중</small>
+      </div>
+    </div>
+    <div class="top-actions">
+      <input id="docSearch" class="search-field" type="search" placeholder="문서 검색">
+      <span id="modeBadge" class="mode-badge">보기 모드</span>
+      <button id="modeToggle" class="mode-toggle" type="button" aria-pressed="false" aria-label="보기 모드와 편집 모드 전환">
+        <span class="mode-option view">보기</span>
+        <span class="mode-option edit">편집</span>
+      </button>
+      <div class="command-controls edit-only" aria-label="작업 되돌리기와 다시 실행">
+        <button id="undoCommand" class="icon command-button" type="button" title="되돌리기 (Ctrl+Z)" disabled>↶</button>
+        <button id="redoCommand" class="icon command-button" type="button" title="다시 실행 (Ctrl+Y)" disabled>↷</button>
+      </div>
+      <button id="openTerms">용어 검색</button>
+      <button id="openHistory">버전 기록</button>
+      <button id="manualSave" class="edit-only">파일 저장</button>
+      <button id="exportJson" class="edit-only">JSON 내보내기</button>
+      <button id="exportHtml">HTML 내보내기</button>
+      <label class="file-button edit-only">가져오기<input id="importProject" type="file" accept=".json,.html,application/json,text/html"></label>
+      <button id="printView">인쇄</button>
+    </div>
+  </header>
+
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="panel-head">
+        <h2>탭</h2>
+      </div>
+      <div id="tabList" class="tab-list"></div>
+      <div class="wiki-sidebar">
+        <button id="wikiHome" class="wiki-home-button" type="button">
+          <span>위키</span>
+          <small id="wikiCount">0개</small>
+        </button>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <section class="document-title">
+        <input id="projectTitle" class="title-input" aria-label="탭 제목" placeholder="탭 제목">
+        <textarea id="projectSubtitle" class="subtitle-input" aria-label="탭 설명" placeholder="이 탭의 설명을 입력하세요."></textarea>
+        <div id="projectMeta" class="meta-row"></div>
+        <div id="activeTabSummary" class="tab-summary"></div>
+      </section>
+      <section id="blocks" class="blocks"></section>
+    </main>
+
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="floatingToolbar" class="floating-toolbar">
+    <button id="formatBold" type="button" title="굵게"><b>B</b></button>
+    <button id="formatItalic" type="button" title="기울임"><i>I</i></button>
+    <button id="formatUnderline" type="button" title="밑줄"><u>U</u></button>
+    <button id="formatLink" type="button" title="링크">Link</button>
+  </div>
+  <div id="slashPalette" class="slash-palette hidden"></div>
+  <input id="imageFilePicker" type="file" accept="image/*">
+  <input id="mediaFilePicker" type="file" accept="image/*,video/*,.gif,.txt,.md,.json,.csv,.tsv,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip">
+  <input id="tableFilePicker" type="file" accept=".xlsx,.xls,.csv,.tsv,text/csv,text/tab-separated-values">
+  <div class="hidden" aria-hidden="true">
+    <input id="imageBasePath" class="text-field">
+    <input id="termKeyword" class="text-field">
+    <textarea id="termDescription" class="text-field"></textarea>
+    <button id="saveTerm" type="button"></button>
+  </div>
+  <aside id="termPanel" class="term-panel hidden" aria-live="polite">
+    <div class="term-panel-head">
+      <h2>용어 사전</h2>
+      <button id="closeTerms" class="icon" title="닫기">×</button>
+    </div>
+    <div class="term-search-wrap">
+      <input id="termSearch" class="term-search" type="search" placeholder="용어 검색">
+    </div>
+    <div id="termResults" class="term-results"></div>
+  </aside>
+
+  <aside id="versionPanel" class="version-panel hidden" aria-live="polite">
+    <div class="term-panel-head">
+      <h2>버전 기록</h2>
+      <button id="closeHistory" class="icon" title="닫기">×</button>
+    </div>
+    <div class="version-actions">
+      <button id="saveVersion" class="primary edit-only" type="button">현재 버전 저장</button>
+      <button id="refreshVersionDiff" type="button">diff 새로고침</button>
+    </div>
+    <div class="version-compare">
+      <label class="field">기준 버전
+        <select id="versionBaseSelect"></select>
+      </label>
+      <label class="field">비교 대상
+        <select id="versionTargetSelect"></select>
+      </label>
+    </div>
+    <div id="versionSummary" class="version-summary"></div>
+    <div id="versionDiff" class="version-diff"></div>
+    <div id="versionList" class="version-list"></div>
+  </aside>
+
+  <script src="assets/data/project-data.js?v=collab-rules-20260601"></script>
+
+  <script src="assets/js/shimroom-core.js?v=tab-repair-20260601"></script>
+  <script src="assets/js/shimroom-media.js?v=table-image-20260601"></script>
+  <script src="assets/js/shimroom-spreadsheet.js?v=table-image-20260601"></script>
+  <script src="assets/js/shimroom-versioning.js"></script>
+  <script src="assets/js/shimroom-render.js?v=unit-drag-20260601"></script>
+  <script src="assets/js/shimroom-actions.js?v=subtabs-20260601"></script>
+  <script src="assets/js/shimroom-wiki.js?v=wiki-manual-20260601c"></script>
+  <script src="assets/js/shimroom-events.js?v=unit-drag-20260601"></script>
+</body>
+</html>
+
+
+
