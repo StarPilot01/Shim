@@ -1084,37 +1084,53 @@ body.content-unit-dragging {
   cursor: grabbing;
 }
 
-.content-insert-line {
+.insert-line {
   position: relative;
-  height: 18px;
-  margin: -4px 0;
-  z-index: 10;
-  opacity: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  opacity: 0;
   transition: opacity 0.16s ease, margin 0.16s ease;
 }
 
-.content-insert-line:hover,
-.content-insert-line:focus-within {
+.insert-line:hover,
+.insert-line:focus-within {
   opacity: 1;
-  margin: 2px 0;
+}
+
+.insert-line--content {
+  height: 14px;
+  margin: 0;
+  z-index: 8;
+}
+
+.insert-line--content:hover,
+.insert-line--content:focus-within {
+  margin: 1px 0;
+}
+
+.content-insert-line {
+  height: 14px;
 }
 
 .content-insert-line::before {
   content: "";
   position: absolute;
-  left: 12px;
-  right: 12px;
+  left: 26px;
+  right: 30px;
   height: 1px;
-  background: rgba(47, 111, 94, 0.28);
+  background: rgba(47, 111, 94, 0.24);
   pointer-events: none;
 }
 
 .content-insert-line:hover::before,
 .content-insert-line:focus-within::before {
   background: var(--accent);
+}
+
+.content-insert-line:hover,
+.content-insert-line:focus-within {
+  margin: 2px 0;
 }
 
 .content-insert-menu {
@@ -4061,36 +4077,40 @@ td:focus {
 
 .block-insert-line {
   position: relative;
-  height: 20px;
-  margin: -10px 0;
-  z-index: 15;
-  opacity: 0;
-  transition: opacity 0.2s ease, margin 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
-}
-.block-insert-line:hover {
-  opacity: 1;
+  margin: 0;
+  z-index: 12;
+  opacity: 0;
+  transition: opacity 0.2s ease, margin 0.2s ease;
 }
 
-.block-insert-line:focus-within {
-  opacity: 1;
+.insert-line--block {
+  height: 22px;
+}
+
+.insert-line--block:hover,
+.insert-line--block:focus-within {
+  margin: 2px 0;
 }
 
 .block-insert-line::before {
   content: "";
   position: absolute;
-  left: 12px;
-  right: 12px;
+  left: 16px;
+  right: 16px;
   height: 2px;
-  background: rgba(47, 111, 94, 0.4);
+  background: rgba(47, 111, 94, 0.35);
   pointer-events: none;
 }
-.block-insert-line:hover::before {
-  background: var(--accent);
+
+.block-insert-line:hover,
+.block-insert-line:focus-within {
+  opacity: 1;
 }
 
+.block-insert-line:hover::before,
 .block-insert-line:focus-within::before {
   background: var(--accent);
 }

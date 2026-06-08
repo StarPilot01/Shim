@@ -379,7 +379,7 @@ const CONTENT_INSERT_TYPES = ["text", "heading", "callout", "quote", "table", "c
 
 function renderBlockInsertLine(insertIndex) {
   return `
-    <div class="block-insert-line edit-only" data-insert-index="${insertIndex}">
+    <div class="insert-line insert-line--block block-insert-line edit-only" data-insert-surface="block" data-insert-index="${insertIndex}">
       <button class="block-insert-btn" type="button" data-block-insert-generic data-insert-index="${insertIndex}" aria-label="빈 블록 추가" title="여기에 빈 블록 추가">+</button>
     </div>
   `;
@@ -389,7 +389,7 @@ function renderEmptyBlockStarter() {
   return `
     <div class="empty block-empty-starter">
       <div class="block-add-panel-inline">
-        <button class="block-add-option" type="button" data-block-insert-generic data-insert-index="0">빈 블록 추가</button>
+        <button class="block-add-option" type="button" data-block-insert-generic data-insert-surface="block" data-insert-index="0">빈 블록 추가</button>
       </div>
     </div>
   `;
@@ -582,7 +582,7 @@ function renderContentInsertButtons(blockId, insertIndex) {
 
 function renderContentInsertLine(blockId, insertIndex) {
   return `
-    <div class="content-insert-line edit-only">
+    <div class="insert-line insert-line--content content-insert-line edit-only" data-insert-surface="content" data-content-block-id="${escapeHtml(blockId)}" data-content-insert-index="${insertIndex}">
       <details class="content-insert-menu">
         <summary class="content-insert-btn" aria-label="콘텐츠 추가" title="이 블록 안에 콘텐츠 추가">+</summary>
         <div class="content-insert-panel" role="menu">

@@ -260,16 +260,6 @@ function insertPlainTextAtEditableRange(editable, range, text) {
   return true;
 }
 
-function mediaInsertTextForEditable(editable, markerText) {
-  const rawText = editable?.innerText || "";
-  const offset = editable ? getCaretCharacterOffsetWithin(editable) : rawText.length;
-  const before = rawText.slice(0, offset);
-  const after = rawText.slice(offset);
-  const prefix = before && !before.endsWith("\n") ? "\n" : "";
-  const suffix = after && !after.startsWith("\n") ? "\n" : "";
-  return `${prefix}${markerText}${suffix}`;
-}
-
 function editableForContentTarget(blockId, unitId = "") {
   const blockEl = document.getElementById(`block-${blockId}`);
   if (!blockEl) return null;
@@ -283,6 +273,128 @@ function imageMarkerForAsset(asset) {
   return `[[image:${assetPath(asset.id)}|${asset.name}]]`;
 }
 
+function splitSerializedMedia(serialized) {
+  const source = String(serialized || "");
+  const matcher = /\[\[(image|video|file):([^\]|]+?)(?:\|([^\]]*))?\]\]/g;
+  const segments = [];
+  let cursor = 0;
+  let match = null;
+  while ((match = matcher.exec(source)) !== null) {
+    if (match.index > cursor) {
+      segments.push({ kind: "text", value: source.slice(cursor, match.index) });
+    }
+    segments.push({
+      kind: "media",
+      marker: {
+        kind: String(match[1] || "").toLowerCase(),
+        path: String(match[2] || "").trim(),
+        caption: String(match[3] || "").trim()
+      }
+    });
+    cursor = matcher.lastIndex;
+  }
+  if (cursor < source.length) {
+    segments.push({ kind: "text", value: source.slice(cursor) });
+  }
+  return segments;
+}
+
+function createImageContentUnit(asset) {
+  const unit = createContentUnit("image");
+  if (asset?.id) unit.assetId = asset.id;
+  unit.path = assetPath(asset?.id || "");
+  unit.caption = asset?.name || unit.caption;
+  return unit;
+}
+
+function createMediaContentUnitFromMarker(marker) {
+  const mediaKind = String(marker?.kind || "image").toLowerCase();
+  const unitType = mediaKind === "video" ? "video" : mediaKind === "file" ? "attachment" : "image";
+  const asset = marker?.path ? assetFromPath(marker.path) : null;
+  const unit = createContentUnit(unitType);
+  unit.path = String(marker?.path || "");
+  if (unit.path.startsWith("asset:")) unit.assetId = unit.path.slice(6);
+  unit.caption = marker?.caption || asset?.name || unit.caption || "";
+  return unit;
+}
+
+function textUnitFromTemplate(templateUnit, content) {
+  if (content === null || content === undefined || content === "") return null;
+  const unitType = ["heading", "text", "callout", "quote"].includes(templateUnit?.type) ? templateUnit.type : "text";
+  const unit = createContentUnit(unitType);
+  unit.content = content;
+  if (["heading", "text", "callout", "quote"].includes(templateUnit?.type)) {
+    if (templateUnit.align !== undefined) unit.align = templateUnit.align;
+    if (templateUnit.fontSize !== undefined) unit.fontSize = templateUnit.fontSize;
+    if (templateUnit.headingLevel !== undefined) unit.headingLevel = templateUnit.headingLevel;
+  }
+  return unit;
+}
+
+function serializeSegmentsToUnits(serialized, templateUnit) {
+  const segments = splitSerializedMedia(serialized);
+  const units = [];
+  let textBuffer = "";
+  const pushTextUnit = () => {
+    const nextUnit = textUnitFromTemplate(templateUnit, textBuffer);
+    if (!nextUnit) {
+      textBuffer = "";
+      return;
+    }
+    units.push(nextUnit);
+    textBuffer = "";
+  };
+  for (const segment of segments) {
+    if (segment.kind === "text") {
+      textBuffer += segment.value;
+      continue;
+    }
+    pushTextUnit();
+    units.push(createMediaContentUnitFromMarker(segment.marker));
+  }
+  pushTextUnit();
+  return units;
+}
+
+function ensureGenericBlock(block) {
+  if (!block || block.type === "generic") return;
+  const original = structuredClone(block);
+  Object.keys(block).forEach(key => delete block[key]);
+  block.id = original.id;
+  block.type = "generic";
+  block.items = [blockToContentUnit(original)];
+}
+
+function replaceSerializedContentUnit(block, unitId, serialized, templateUnit, wasGeneric) {
+  if (!block) return false;
+  const wasGenericBefore = wasGeneric === undefined ? block.type === "generic" : wasGeneric;
+  const units = serializeSegmentsToUnits(serialized, templateUnit || block);
+  if (!units.length) return false;
+  ensureGenericBlock(block);
+  if (!Array.isArray(block.items)) block.items = [];
+  const targetUnitId = unitId || "";
+  const targetIndex = targetUnitId ? block.items.findIndex(item => item.id === targetUnitId) : -1;
+  if (targetIndex >= 0) {
+    block.items.splice(targetIndex, 1, ...units);
+    return true;
+  }
+  if (!wasGenericBefore) {
+    block.items.splice(0, 1, ...units);
+    return true;
+  }
+  block.items.push(...units);
+  return true;
+}
+
+function insertUnitsIntoBlock(block, units, unitId = "") {
+  if (!block || !Array.isArray(units) || !units.length) return false;
+  ensureGenericBlock(block);
+  const unitIndex = unitId ? block.items.findIndex(item => item.id === unitId) : -1;
+  const insertAt = unitIndex >= 0 ? unitIndex + 1 : block.items.length;
+  block.items.splice(insertAt, 0, ...units);
+  return true;
+}
+
 function insertImageAssetsIntoEditable(editable, assets, range, commandLabel = "이미지 삽입") {
   const block = currentBlockFromEvent({ target: editable });
   if (!block) return false;
@@ -291,14 +403,13 @@ function insertImageAssetsIntoEditable(editable, assets, range, commandLabel = "
   if (!("content" in targetBlock)) return false;
   const markerText = assets.map(imageMarkerForAsset).join("\n");
   if (!restoreEditableRange(editable, range)) return false;
-  const insertText = mediaInsertTextForEditable(editable, markerText);
-  if (!insertPlainTextAtEditableRange(editable, null, insertText)) return false;
+  if (!insertPlainTextAtEditableRange(editable, null, markerText)) return false;
   const nextContent = serializeEditableContent(editable);
   CommandManager.execute(commandLabel, () => {
     assets.forEach(asset => {
       if (!findAssetById(asset.id)) state.assets.push(asset);
     });
-    targetBlock.content = nextContent;
+    replaceSerializedContentUnit(block, unit?.id || "", nextContent, targetBlock, block.type === "generic");
   });
   return true;
 }
@@ -1036,7 +1147,9 @@ async function insertSelectedImageFile(file) {
     }
     CommandManager.execute("이미지 삽입", () => {
       if (!findAssetById(asset.id)) state.assets.push(asset);
-      targetBlock.content = `${targetBlock.content || ""}${targetBlock.content ? "\n" : ""}${imageMarkerForAsset(asset)}`;
+      const markerText = imageMarkerForAsset(asset);
+      const nextSerialized = `${targetBlock.content || ""}${targetBlock.content ? "\n" : ""}${markerText}`;
+      replaceSerializedContentUnit(block, unit?.id || "", nextSerialized, targetBlock, block.type === "generic");
     });
     pendingImageInsert = null;
     toast("이미지를 삽입했습니다.");
@@ -1114,33 +1227,27 @@ async function pasteClipboardImages(blockId, unitId, files, editable = null, ran
     const block = findBlockById(blockId);
     if (!block) return;
     assets.forEach(asset => {
-      if (!findAssetById(asset.id)) state.assets.push(asset);
-    });
-    const targetBlock = unitId ? block.items?.find(item => item.id === unitId) : block;
-    if (targetBlock && "content" in targetBlock) {
-      const markers = assets.map(imageMarkerForAsset).join("\n");
-      targetBlock.content = `${targetBlock.content || ""}${targetBlock.content ? "\n" : ""}${markers}`;
-      return;
-    }
-    if (block.type !== "generic") {
-      const original = structuredClone(block);
-      Object.keys(block).forEach(key => delete block[key]);
-      block.id = original.id;
-      block.type = "generic";
-      block.items = [blockToContentUnit(original)];
-    }
+    if (!findAssetById(asset.id)) state.assets.push(asset);
+  });
+  const targetBlock = unitId ? block.items?.find(item => item.id === unitId) : block;
+  if (targetBlock && "content" in targetBlock) {
+    const markerText = assets.map(imageMarkerForAsset).join("\n");
+    const nextSerialized = `${targetBlock.content || ""}${targetBlock.content ? "\n" : ""}${markerText}`;
+    replaceSerializedContentUnit(block, unitId || "", nextSerialized, targetBlock, block.type === "generic");
+    return;
+  }
+  if (block.type !== "generic") {
+    const original = structuredClone(block);
+    Object.keys(block).forEach(key => delete block[key]);
+    block.id = original.id;
+    block.type = "generic";
+    block.items = [blockToContentUnit(original)];
+  }
+  const imageUnits = assets.map(createImageContentUnit);
+  if (!insertUnitsIntoBlock(block, imageUnits, unitId)) {
     block.items = Array.isArray(block.items) ? block.items : [];
-    const unitIndex = unitId ? block.items.findIndex(item => item.id === unitId) : -1;
-    const insertAt = unitIndex >= 0 ? unitIndex + 1 : block.items.length;
-    const imageUnits = assets.map(asset => ({
-      id: uid("unit"),
-      type: "image",
-      assetId: asset.id,
-      path: assetPath(asset.id),
-      caption: asset.name,
-      imageWidth: 100
-    }));
-    block.items.splice(insertAt, 0, ...imageUnits);
+    block.items.push(...imageUnits);
+  }
   });
   const hasSessionOnlyPreview = assets.some(asset => !asset.dataUrl);
   if (hasSessionOnlyPreview) {
@@ -2353,6 +2460,7 @@ els.blocks.addEventListener("click", event => {
   }
   const meetingCreateButton = event.target.closest("[data-meeting-create]");
   if (meetingCreateButton) {
+    event.preventDefault();
     createMeetingFromPanel(meetingCreateButton.closest("[data-meeting-panel]"));
     return;
   }
@@ -2387,13 +2495,15 @@ els.blocks.addEventListener("click", event => {
     return;
   }
   const genericInsertButton = event.target.closest("[data-block-insert-generic]");
-  if (genericInsertButton) {
+  const genericInsertSurface = genericInsertButton?.closest("[data-insert-surface]");
+  if (genericInsertButton && (!genericInsertSurface || genericInsertSurface.dataset.insertSurface === "block")) {
     const idx = Number(genericInsertButton.dataset.insertIndex);
     addBlock("generic", Number.isFinite(idx) ? idx : null);
     return;
   }
   const contentInsertButton = event.target.closest("[data-content-insert-type]");
-  if (contentInsertButton) {
+  const contentInsertSurface = contentInsertButton?.closest("[data-insert-surface]");
+  if (contentInsertButton && (!contentInsertSurface || contentInsertSurface.dataset.insertSurface === "content")) {
     if (!isEditing) return;
     const idx = Number(contentInsertButton.dataset.contentInsertIndex);
     insertContentUnit(
@@ -2938,6 +3048,13 @@ window.addEventListener("beforeunload", () => {
 
 document.addEventListener("click", event => {
   if (isEditing) return;
+  if (event.defaultPrevented) return;
+  const meetingCreateButton = event.target.closest("[data-meeting-create]");
+  if (meetingCreateButton) {
+    event.preventDefault();
+    createMeetingFromPanel(meetingCreateButton.closest("[data-meeting-panel]"));
+    return;
+  }
   const editable = event.target.closest(".editable, .block-body");
   if (editable && event.target.closest(".block")) {
     toast("편집하려면 상단의 편집 모드로 전환하세요.");
