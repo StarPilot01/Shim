@@ -24,6 +24,7 @@ const BLOCK_DEFINITIONS = Object.freeze({
   table: { label: "엑셀표", create: () => ({ rows: [["항목", "내용"], ["", ""]] }) },
   flow: { label: "플로우", create: () => ({ content: "시작 -> 행동 -> 변화" }) },
   mermaid: { label: "Mermaid", create: () => ({ content: defaultMermaid() }) },
+  drawing: { label: "그림판", create: () => ({ dataUrl: "", caption: "그림판", brushColor: "#202522", brushSize: 6 }) },
   image: { label: "이미지", create: () => ({ caption: "캡션", path: "", assetId: "", imageWidth: 100 }) },
   video: { label: "동영상", create: () => ({ caption: "동영상 설명", path: "", assetId: "" }) },
   attachment: { label: "파일/글", create: () => ({ caption: "첨부 설명", path: "", assetId: "" }) },
@@ -82,6 +83,12 @@ function normalizeImageWidth(value, fallback = 100) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return fallback;
   return Math.max(20, Math.min(100, Math.round(numeric / 5) * 5));
+}
+
+function normalizeDrawingBrushSize(value, fallback = 6) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(1, Math.min(36, Math.round(numeric)));
 }
 
 function paragraphFontSize(target = {}) {
@@ -583,6 +590,13 @@ function normalizeBlock(block) {
   if (block.type === "image") {
     block.imageWidth = normalizeImageWidth(block.imageWidth);
   }
+  if (block.type === "drawing") {
+    block.dataUrl = String(block.dataUrl || "");
+    block.caption ||= "그림판";
+    block.brushColor = normalizeRichColor(block.brushColor);
+    block.brushSize = normalizeDrawingBrushSize(block.brushSize);
+    block.drawingTool = block.drawingTool === "eraser" ? "eraser" : "pen";
+  }
   if (["table", "dataset"].includes(block.type)) {
     block.filter ||= "";
     block.sortColumn = Number.isInteger(block.sortColumn) ? block.sortColumn : -1;
@@ -647,6 +661,13 @@ function normalizeContentUnit(unit) {
   }
   if (unit.type === "image") {
     unit.imageWidth = normalizeImageWidth(unit.imageWidth);
+  }
+  if (unit.type === "drawing") {
+    unit.dataUrl = String(unit.dataUrl || "");
+    unit.caption ||= "그림판";
+    unit.brushColor = normalizeRichColor(unit.brushColor);
+    unit.brushSize = normalizeDrawingBrushSize(unit.brushSize);
+    unit.drawingTool = unit.drawingTool === "eraser" ? "eraser" : "pen";
   }
   if (["table", "dataset"].includes(unit.type)) {
     unit.filter ||= "";

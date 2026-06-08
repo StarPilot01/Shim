@@ -82,6 +82,7 @@ function render() {
   renderDatasetSelect();
   renderBlocks();
   renderMermaidBlocks();
+  if (typeof renderDrawingCanvases === "function") renderDrawingCanvases();
   updateStatus();
   updateCommandButtons();
   restoreSelection(savedSel);
@@ -374,7 +375,7 @@ function renderViewBlocksWithDataDrawers(tab, blocks) {
   return pieces.join("");
 }
 
-const CONTENT_INSERT_TYPES = ["text", "heading", "callout", "quote", "table", "checklist", "code", "divider", "flow", "mermaid", "image", "video", "attachment"];
+const CONTENT_INSERT_TYPES = ["text", "heading", "callout", "quote", "table", "checklist", "code", "divider", "flow", "mermaid", "drawing", "image", "video", "attachment"];
 
 function renderBlockInsertLine(insertIndex) {
   return `
@@ -605,7 +606,28 @@ function fontSizeStyle(target) {
   return `font-size:${paragraphFontSize(target)}px`;
 }
 
-function renderEditableSizedContent(value, fallback = "") {
+function renderEditableMediaLine(line) {
+  const source = String(line || "");
+  const marker = source.trim();
+  const media = parseMediaLine(marker);
+  const image = media?.kind === "image" ? media : parseImageLine(marker);
+  if (!image) return "";
+  const src = resolveImagePath(image.path);
+  const label = image.caption || image.path;
+  return `
+    <span class="editable-media editable-media-image" contenteditable="false" data-media-marker="${escapeHtml(marker)}">
+      <span class="editable-media-preview">
+        ${src ? `<img src="${escapeHtml(src)}" alt="${escapeHtml(label)}">` : `<span class="editable-media-empty">이미지를 불러올 수 없습니다.</span>`}
+      </span>
+      <span class="editable-media-footer">
+        ${label ? `<span class="editable-media-caption">${escapeHtml(label)}</span>` : ""}
+        <button class="editable-media-delete" type="button" data-editable-media-delete>삭제</button>
+      </span>
+    </span>
+  `;
+}
+
+function renderEditableSizedText(value, fallback = "") {
   const source = String(value || fallback);
   const pattern = /\[\[(size):(12|14|16|18|20|24|28)\|([\s\S]*?)\]\]|\[\[(align):(left|center|right)\|([\s\S]*?)\]\]|\[\[(color|mark):(#[0-9a-fA-F]{6})\|([\s\S]*?)\]\]/g;
   let cursor = 0;
@@ -631,6 +653,15 @@ function renderEditableSizedContent(value, fallback = "") {
   }
   html += escapeEditable(source.slice(cursor));
   return html;
+}
+
+function renderEditableSizedContent(value, fallback = "") {
+  const source = String(value || fallback);
+  const lines = source.split(/\n/);
+  if (!lines.some(line => renderEditableMediaLine(line))) return renderEditableSizedText(source);
+  return lines
+    .map(line => renderEditableMediaLine(line) || renderEditableSizedText(line))
+    .join("<br>");
 }
 
 function renderParagraphTools(target = {}) {
@@ -807,6 +838,7 @@ function renderContentUnitBody(unit) {
   if (unit.type === "checklist") return renderChecklistBlock(unit);
   if (unit.type === "code") return renderCodeBlock(unit);
   if (unit.type === "divider") return renderDividerBlock(unit);
+  if (unit.type === "drawing") return renderDrawingBlock(unit);
   if (unit.type === "image") return renderImageBlock(unit);
   if (unit.type === "video") return renderVideoBlock(unit);
   if (unit.type === "attachment") return renderAttachmentBlock(unit);
@@ -831,6 +863,49 @@ function renderContentUnitBody(unit) {
   if (unit.type === "table") return renderTableBlock(unit);
   if (unit.type === "dataset") return renderDatasetBlock(unit);
   return `<div class="empty">지원하지 않는 콘텐츠입니다.</div>`;
+}
+
+function safeDrawingColor(value) {
+  const color = String(value || "").trim();
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color : "#202522";
+}
+
+function safeDrawingSize(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(1, Math.min(36, Math.round(numeric))) : 6;
+}
+
+function renderDrawingBlock(block) {
+  const src = String(block.dataUrl || "");
+  const color = safeDrawingColor(block.brushColor);
+  const size = safeDrawingSize(block.brushSize);
+  const tool = block.drawingTool === "eraser" ? "eraser" : "pen";
+  if (!isEditing) {
+    return src
+      ? `<figure class="drawing-view"><img src="${escapeHtml(src)}" alt="${escapeHtml(block.caption || "그림판")}">${block.caption ? `<figcaption>${escapeHtml(block.caption)}</figcaption>` : ""}</figure>`
+      : `<div class="empty">저장된 그림이 없습니다.</div>`;
+  }
+  return `
+    <div class="drawing-board" data-drawing-board>
+      <div class="drawing-toolbar">
+        <label class="drawing-control">색
+          <input type="color" data-drawing-color value="${escapeHtml(color)}">
+        </label>
+        <label class="drawing-control drawing-size-control">굵기
+          <input type="range" min="1" max="36" step="1" data-drawing-size value="${size}">
+          <output>${size}</output>
+        </label>
+        <button type="button" class="${tool === "pen" ? "active" : ""}" data-drawing-tool="pen" aria-pressed="${tool === "pen"}">펜</button>
+        <button type="button" class="${tool === "eraser" ? "active" : ""}" data-drawing-tool="eraser" aria-pressed="${tool === "eraser"}">지우개</button>
+        <button type="button" data-drawing-undo>되돌리기</button>
+        <button type="button" class="danger" data-drawing-clear>전체 지우기</button>
+      </div>
+      <div class="drawing-canvas-wrap">
+        <canvas class="drawing-canvas" width="960" height="540" data-drawing-canvas data-drawing-src="${escapeHtml(src)}"></canvas>
+      </div>
+      <div class="caption editable" contenteditable="${editAttr()}" data-field="caption">${escapeEditable(block.caption || "그림판")}</div>
+    </div>
+  `;
 }
 
 function dialogueCell(row, index) {
@@ -1282,6 +1357,26 @@ function calendarTaskEvents(sheet = "업무목록") {
     }));
 }
 
+function meetingDateTime(dateKey, time = "") {
+  if (!isDateKey(dateKey)) return null;
+  const [year, month, day] = String(dateKey).split("-").map(Number);
+  const timeMatch = String(time || "").trim().match(/^(\d{1,2})(?::(\d{2}))?/);
+  const hour = timeMatch ? Math.min(23, Math.max(0, Number(timeMatch[1]) || 0)) : 0;
+  const minute = timeMatch ? Math.min(59, Math.max(0, Number(timeMatch[2]) || 0)) : 0;
+  return new Date(year, month - 1, day, hour, minute);
+}
+
+function isPastMeetingTime(dateKey, time = "", now = new Date()) {
+  const meetingAt = meetingDateTime(dateKey, time);
+  return meetingAt ? meetingAt.getTime() < now.getTime() : false;
+}
+
+function displayMeetingStatus(status, dateKey, time = "") {
+  const normalized = String(status || "").trim() || "예정";
+  if (normalized === "예정" && isPastMeetingTime(dateKey, time)) return "완료";
+  return normalized;
+}
+
 function meetingRows(sheet = "회의록") {
   const rows = ensureRows(state.datasets[sheet] || []);
   const headerIndex = sheetHeaderIndex(rows, "회의ID");
@@ -1296,7 +1391,7 @@ function meetingRows(sheet = "회의록") {
     agenda: calendarColumnIndex(header, ["안건"], 5),
     minutes: calendarColumnIndex(header, ["회의록", "내용"], 6),
     decisions: calendarColumnIndex(header, ["결정사항", "결정"], 7),
-    actions: calendarColumnIndex(header, ["액션아이템", "후속조치"], 8),
+    actions: calendarColumnIndex(header, ["액션아이템", "후속조치"], -1),
     status: calendarColumnIndex(header, ["상태"], 9),
     created: calendarColumnIndex(header, ["작성일"], 10)
   };
@@ -1304,17 +1399,20 @@ function meetingRows(sheet = "회의록") {
     .map((row, index) => {
       const dateKey = String(row[indexes.date] || "").trim();
       if (!isDateKey(dateKey)) return null;
+      const time = String(row[indexes.time] || "22:00").trim() || "22:00";
+      const rawStatus = String(row[indexes.status] || "예정").trim() || "예정";
       return {
         id: String(row[indexes.id] || `meeting-row-${index}`).trim(),
         dateKey,
-        time: String(row[indexes.time] || "22:00").trim() || "22:00",
+        time,
         title: String(row[indexes.title] || "주간 회의").trim() || "주간 회의",
         attendees: String(row[indexes.attendees] || "").trim(),
         agenda: String(row[indexes.agenda] || "").trim(),
         minutes: String(row[indexes.minutes] || "").trim(),
         decisions: String(row[indexes.decisions] || "").trim(),
-        actions: String(row[indexes.actions] || "").trim(),
-        status: String(row[indexes.status] || "예정").trim() || "예정",
+        actions: indexes.actions >= 0 ? String(row[indexes.actions] || "").trim() : "",
+        status: displayMeetingStatus(rawStatus, dateKey, time),
+        rawStatus,
         created: String(row[indexes.created] || "").trim()
       };
     })
@@ -1706,6 +1804,7 @@ function renderMeetingAttendeePicker(members) {
   const fallbackMembers = assignableMembers.length ? assignableMembers : members;
   return `
     <div class="meeting-attendee-picker" role="group" aria-label="회의 참석자 선택">
+      ${fallbackMembers.length ? `<button class="meeting-attendee-all" type="button" data-meeting-attendee-all>전체 참석</button>` : ""}
       ${fallbackMembers.length ? fallbackMembers.map(member => `
         <label class="meeting-attendee-option" style="--member-color:${escapeHtml(member.color)}">
           <input type="checkbox" data-meeting-attendee value="${escapeHtml(member.name)}">
@@ -1739,7 +1838,6 @@ function renderMeetingCard(meeting, membersByName = new Map()) {
       ${renderMeetingTextSection("안건", meeting.agenda)}
       ${renderMeetingTextSection("회의록", meeting.minutes)}
       ${renderMeetingTextSection("결정사항", meeting.decisions)}
-      ${renderMeetingTextSection("액션아이템", meeting.actions)}
     </article>
   `;
 }
@@ -1801,9 +1899,6 @@ function renderMeetingBookBlock(block) {
           </label>
           <label class="field">결정사항
             <textarea data-meeting-decisions placeholder="결정된 내용을 정리하세요."></textarea>
-          </label>
-          <label class="field">액션아이템
-            <textarea data-meeting-actions placeholder="담당자와 후속 업무를 적어주세요."></textarea>
           </label>
         </div>
       </section>
@@ -1961,6 +2056,9 @@ function renderBlockBody(block) {
   if (block.type === "divider") {
     return renderDividerBlock(block);
   }
+  if (block.type === "drawing") {
+    return renderDrawingBlock(block);
+  }
   if (block.type === "dialogue") {
     return renderDialogueBlock(block);
   }
@@ -2089,10 +2187,11 @@ function renderDatasetBlock(block) {
   const activeSheet = state.datasets[block.sheet] ? block.sheet : Object.keys(state.datasets)[0] || "";
   const rows = ensureRows(state.datasets[activeSheet] || [[]]);
   const options = Object.keys(state.datasets).map(name => `<option value="${escapeHtml(name)}" ${name === activeSheet ? "selected" : ""}>${escapeHtml(name)}</option>`).join("");
+  const hiddenColumns = activeSheet === "회의록" ? ["액션아이템"] : [];
   return `
-    ${renderSheetTools(block, "dataset", rows, options)}
+    ${renderSheetTools(block, "dataset", rows, options, hiddenColumns)}
     <div class="table-wrap">
-      ${renderSheetTable(rows, block, "dataset-cell")}
+      ${renderSheetTable(rows, block, "dataset-cell", hiddenColumns)}
     </div>
   `;
 }

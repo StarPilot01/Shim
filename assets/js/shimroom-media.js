@@ -183,6 +183,7 @@ function renderImageBlock(block) {
       ` : `<div class="empty">이미지는 글쓰기 블록의 이미지 아이콘으로 삽입하세요.</div>`}
       ${renderImageSizeControl(block)}
       <div class="inline-tools edit-only">
+        <button class="danger" data-image-remove type="button">이미지 삭제</button>
         <button data-image-file-select>이미지 업로드</button>
       </div>
       ${renderAssetMeta(assetFromBlock(block))}

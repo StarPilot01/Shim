@@ -10,3 +10,6 @@ AGENTS.md
 # Local test artifacts
 test-results/
 shimroom_test_runner.html
+
+# Local collaboration runtime state
+.collab/

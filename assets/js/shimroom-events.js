@@ -3,6 +3,7 @@ let paragraphFormatRange = null;
 let paragraphFormatBlockId = "";
 let slashPaletteVisible = false;
 let slashPaletteItems = [
+  { type: "drawing", label: "그림판", icon: "DRAW" },
   { type: "heading", label: "제목", icon: "H" },
   { type: "text", label: "텍스트", icon: "T" },
   { type: "image", label: "이미지", icon: "IMG" },
@@ -47,6 +48,21 @@ const contentUnitDragState = {
   pointerX: 0,
   pointerY: 0
 };
+const drawingStrokeState = {
+  active: false,
+  canvas: null,
+  context: null,
+  target: null,
+  blockId: "",
+  targetKey: "",
+  pointerId: null,
+  lastX: 0,
+  lastY: 0,
+  tool: "pen",
+  color: "#202522",
+  size: 6
+};
+const drawingHistory = new Map();
 
 function updateFloatingToolbar() {
   if (!isEditing || !els.floatingToolbar) return;
@@ -144,6 +160,7 @@ function serializeEditableContent(editable) {
       return node.nodeValue.replace(/\u00a0/g, " ");
     }
     if (node.nodeType !== Node.ELEMENT_NODE) return "";
+    if (node.dataset.mediaMarker) return node.dataset.mediaMarker;
     if (node.tagName === "BR") return "\n";
     const childNodes = Array.from(node.childNodes);
     let text = childNodes.map((child, index) => walk(child, index === childNodes.length - 1)).join("");
@@ -194,6 +211,118 @@ function replaceSelectionWithElement(element) {
   sel.removeAllRanges();
   sel.addRange(range);
   return true;
+}
+
+function editableRange(editable) {
+  const sel = window.getSelection();
+  if (!editable || !sel || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  if (!editable.contains(range.commonAncestorContainer)) return null;
+  return range.cloneRange();
+}
+
+function restoreEditableRange(editable, range) {
+  const sel = window.getSelection();
+  if (!editable || !sel) return false;
+  editable.focus();
+  if (range && editable.contains(range.commonAncestorContainer)) {
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return true;
+  }
+  const fallback = document.createRange();
+  fallback.selectNodeContents(editable);
+  fallback.collapse(false);
+  sel.removeAllRanges();
+  sel.addRange(fallback);
+  return true;
+}
+
+function insertPlainTextAtEditableRange(editable, range, text) {
+  const sel = window.getSelection();
+  if (range) {
+    if (!restoreEditableRange(editable, range)) return false;
+  } else {
+    const anchor = sel?.anchorNode || null;
+    if (!anchor || !editable.contains(anchor)) {
+      if (!restoreEditableRange(editable, null)) return false;
+    }
+  }
+  if (!sel || sel.rangeCount === 0) return false;
+  const activeRange = sel.getRangeAt(0);
+  activeRange.deleteContents();
+  const node = document.createTextNode(text);
+  activeRange.insertNode(node);
+  activeRange.setStartAfter(node);
+  activeRange.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(activeRange);
+  return true;
+}
+
+function mediaInsertTextForEditable(editable, markerText) {
+  const rawText = editable?.innerText || "";
+  const offset = editable ? getCaretCharacterOffsetWithin(editable) : rawText.length;
+  const before = rawText.slice(0, offset);
+  const after = rawText.slice(offset);
+  const prefix = before && !before.endsWith("\n") ? "\n" : "";
+  const suffix = after && !after.startsWith("\n") ? "\n" : "";
+  return `${prefix}${markerText}${suffix}`;
+}
+
+function editableForContentTarget(blockId, unitId = "") {
+  const blockEl = document.getElementById(`block-${blockId}`);
+  if (!blockEl) return null;
+  if (unitId) {
+    return blockEl.querySelector(`[data-unit-id="${CSS.escape(unitId)}"] [data-field="content"].editable`);
+  }
+  return blockEl.querySelector('[data-field="content"].editable');
+}
+
+function imageMarkerForAsset(asset) {
+  return `[[image:${assetPath(asset.id)}|${asset.name}]]`;
+}
+
+function insertImageAssetsIntoEditable(editable, assets, range, commandLabel = "이미지 삽입") {
+  const block = currentBlockFromEvent({ target: editable });
+  if (!block) return false;
+  const unit = contentUnitFromElement(editable);
+  const targetBlock = unit || block;
+  if (!("content" in targetBlock)) return false;
+  const markerText = assets.map(imageMarkerForAsset).join("\n");
+  if (!restoreEditableRange(editable, range)) return false;
+  const insertText = mediaInsertTextForEditable(editable, markerText);
+  if (!insertPlainTextAtEditableRange(editable, null, insertText)) return false;
+  const nextContent = serializeEditableContent(editable);
+  CommandManager.execute(commandLabel, () => {
+    assets.forEach(asset => {
+      if (!findAssetById(asset.id)) state.assets.push(asset);
+    });
+    targetBlock.content = nextContent;
+  });
+  return true;
+}
+
+function deleteEditableMedia(button) {
+  const marker = button?.closest("[data-media-marker]");
+  const editable = marker?.closest('[data-field="content"].editable');
+  const block = editable ? currentBlockFromEvent({ target: editable }) : null;
+  if (!marker || !editable || !block) return;
+  const unit = contentUnitFromElement(editable);
+  const targetBlock = unit || block;
+  const next = marker.nextSibling;
+  const prev = marker.previousSibling;
+  marker.remove();
+  if (next?.nodeName === "BR") {
+    next.remove();
+  } else if (prev?.nodeName === "BR") {
+    prev.remove();
+  }
+  const nextContent = serializeEditableContent(editable);
+  CommandManager.execute("이미지 삭제", () => {
+    targetBlock.content = nextContent;
+  });
+  toast("이미지를 삭제했습니다.");
 }
 
 function stripRichFormatting(value) {
@@ -458,6 +587,217 @@ function contentTargetFromEvent(event) {
   return unit || currentBlockFromEvent(event);
 }
 
+function safeDrawingControlColor(value) {
+  if (typeof safeDrawingColor === "function") return safeDrawingColor(value);
+  const color = String(value || "").trim();
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color : "#202522";
+}
+
+function safeDrawingControlSize(value) {
+  if (typeof safeDrawingSize === "function") return safeDrawingSize(value);
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(1, Math.min(36, Math.round(numeric))) : 6;
+}
+
+function drawingTargetFromElement(element) {
+  const block = currentBlockFromEvent({ target: element });
+  if (!block) return null;
+  const unit = contentUnitFromElement(element);
+  const target = unit || block;
+  if (target?.type !== "drawing") return null;
+  const targetKey = unit ? `unit:${unit.id}` : "block";
+  return { block, target, targetKey, key: `block:${block.id}:${targetKey}` };
+}
+
+function drawingContext(canvas) {
+  const ctx = canvas?.getContext?.("2d");
+  if (!ctx) return null;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  return ctx;
+}
+
+function loadDrawingCanvas(canvas, source) {
+  const ctx = drawingContext(canvas);
+  if (!ctx) return;
+  const src = String(source || "");
+  if (canvas.dataset.drawingLoaded === src && canvas.dataset.drawingLoading !== src) return;
+  canvas.dataset.drawingLoading = src;
+  ctx.globalCompositeOperation = "source-over";
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!src) {
+    canvas.dataset.drawingLoaded = src;
+    delete canvas.dataset.drawingLoading;
+    return;
+  }
+  const image = new Image();
+  image.onload = () => {
+    if (canvas.dataset.drawingLoading !== src) return;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    canvas.dataset.drawingLoaded = src;
+    delete canvas.dataset.drawingLoading;
+  };
+  image.onerror = () => {
+    if (canvas.dataset.drawingLoading === src) delete canvas.dataset.drawingLoading;
+    if (canvas.dataset.drawingLoaded !== src) canvas.dataset.drawingLoaded = "";
+  };
+  image.src = src;
+}
+
+function renderDrawingCanvases() {
+  document.querySelectorAll("[data-drawing-canvas]").forEach(canvas => {
+    loadDrawingCanvas(canvas, canvas.dataset.drawingSrc || "");
+  });
+}
+
+function drawingCanvasPoint(canvas, event) {
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(1, rect.width);
+  const height = Math.max(1, rect.height);
+  const x = ((event.clientX - rect.left) / width) * canvas.width;
+  const y = ((event.clientY - rect.top) / height) * canvas.height;
+  return {
+    x: Math.max(0, Math.min(canvas.width, x)),
+    y: Math.max(0, Math.min(canvas.height, y))
+  };
+}
+
+function applyDrawingStyle(ctx, target) {
+  const tool = target.drawingTool === "eraser" ? "eraser" : "pen";
+  const size = safeDrawingControlSize(target.brushSize);
+  ctx.lineWidth = size;
+  ctx.globalCompositeOperation = tool === "eraser" ? "destination-out" : "source-over";
+  ctx.strokeStyle = tool === "eraser" ? "rgba(0,0,0,1)" : safeDrawingControlColor(target.brushColor);
+  ctx.fillStyle = ctx.strokeStyle;
+  return { tool, size, color: safeDrawingControlColor(target.brushColor) };
+}
+
+function drawDrawingDot(ctx, point, size) {
+  ctx.beginPath();
+  ctx.arc(point.x, point.y, Math.max(0.5, size / 2), 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function pushDrawingHistory(info, dataUrl) {
+  if (!info?.key) return;
+  const entries = drawingHistory.get(info.key) || [];
+  const value = String(dataUrl || "");
+  if (entries.at(-1) !== value) entries.push(value);
+  while (entries.length > 30) entries.shift();
+  drawingHistory.set(info.key, entries);
+}
+
+function restoreDrawingHistory(info) {
+  const entries = drawingHistory.get(info?.key) || [];
+  if (!entries.length) {
+    toast("되돌릴 그림 기록이 없습니다.");
+    return;
+  }
+  const previous = entries.pop();
+  drawingHistory.set(info.key, entries);
+  CommandManager.execute("그림판 되돌리기", () => {
+    info.target.dataUrl = previous;
+  });
+  toast("그림을 되돌렸습니다.");
+}
+
+function clearDrawingBoard(element) {
+  const info = drawingTargetFromElement(element);
+  if (!info) return;
+  const canvas = element.closest("[data-drawing-board]")?.querySelector("[data-drawing-canvas]");
+  const currentDataUrl = info.target.dataUrl || canvas?.toDataURL?.("image/png") || "";
+  pushDrawingHistory(info, currentDataUrl);
+  CommandManager.execute("그림판 전체 지우기", () => {
+    info.target.dataUrl = "";
+  });
+  toast("그림판을 비웠습니다.");
+}
+
+function setDrawingTool(element, tool) {
+  const info = drawingTargetFromElement(element);
+  if (!info) return;
+  const nextTool = tool === "eraser" ? "eraser" : "pen";
+  CommandManager.execute("그림판 도구 변경", () => {
+    info.target.drawingTool = nextTool;
+  });
+}
+
+function matchesDrawingPointer(event) {
+  return drawingStrokeState.pointerId === null || event.pointerId === undefined || event.pointerId === drawingStrokeState.pointerId;
+}
+
+function beginDrawingStroke(event) {
+  const canvas = event.target.closest("[data-drawing-canvas]");
+  if (!canvas || !isEditing || event.button !== 0 || drawingStrokeState.active) return false;
+  const info = drawingTargetFromElement(canvas);
+  const ctx = drawingContext(canvas);
+  if (!info || !ctx) return false;
+  loadDrawingCanvas(canvas, info.target.dataUrl || "");
+  delete canvas.dataset.drawingLoading;
+  const point = drawingCanvasPoint(canvas, event);
+  pushDrawingHistory(info, info.target.dataUrl || "");
+  CommandManager.beginDraft("그림판 그리기", `drawing:${info.key}`);
+  const style = applyDrawingStyle(ctx, info.target);
+  drawDrawingDot(ctx, point, style.size);
+  drawingStrokeState.active = true;
+  drawingStrokeState.canvas = canvas;
+  drawingStrokeState.context = ctx;
+  drawingStrokeState.target = info.target;
+  drawingStrokeState.blockId = info.block.id;
+  drawingStrokeState.targetKey = info.targetKey;
+  drawingStrokeState.pointerId = event.pointerId ?? null;
+  drawingStrokeState.lastX = point.x;
+  drawingStrokeState.lastY = point.y;
+  drawingStrokeState.tool = style.tool;
+  drawingStrokeState.color = style.color;
+  drawingStrokeState.size = style.size;
+  try {
+    canvas.setPointerCapture?.(event.pointerId);
+  } catch (_) {
+    // Synthetic pointer events in tests may not have an active pointer.
+  }
+  event.preventDefault();
+  return true;
+}
+
+function applyDrawingStroke(event) {
+  if (!drawingStrokeState.active || !matchesDrawingPointer(event)) return;
+  const { canvas, context, target } = drawingStrokeState;
+  if (!canvas || !context || !target) return;
+  const point = drawingCanvasPoint(canvas, event);
+  applyDrawingStyle(context, target);
+  context.beginPath();
+  context.moveTo(drawingStrokeState.lastX, drawingStrokeState.lastY);
+  context.lineTo(point.x, point.y);
+  context.stroke();
+  drawingStrokeState.lastX = point.x;
+  drawingStrokeState.lastY = point.y;
+  event.preventDefault();
+}
+
+function finishDrawingStroke(event) {
+  if (!drawingStrokeState.active || !matchesDrawingPointer(event)) return false;
+  const { canvas, context, target } = drawingStrokeState;
+  if (canvas && context && target) {
+    context.globalCompositeOperation = "source-over";
+    target.dataUrl = canvas.toDataURL("image/png");
+    canvas.dataset.drawingSrc = target.dataUrl;
+    canvas.dataset.drawingLoaded = target.dataUrl;
+  }
+  drawingStrokeState.active = false;
+  drawingStrokeState.canvas = null;
+  drawingStrokeState.context = null;
+  drawingStrokeState.target = null;
+  drawingStrokeState.blockId = "";
+  drawingStrokeState.targetKey = "";
+  drawingStrokeState.pointerId = null;
+  CommandManager.commitDraft({ render: false });
+  event?.preventDefault?.();
+  return true;
+}
+
 function updateImageWidthUi(frame, input, output, width) {
   const normalized = normalizeImageWidth(width);
   frame?.style.setProperty("--image-width", `${normalized}%`);
@@ -688,26 +1028,15 @@ async function insertSelectedImageFile(file) {
     return;
   }
   if (target === "paragraph" || target === "text") {
+    const editable = editableForContentTarget(block.id, unit?.id || "");
+    if (editable && insertImageAssetsIntoEditable(editable, [asset], paragraphFormatRange, "이미지 삽입")) {
+      pendingImageInsert = null;
+      toast("이미지를 삽입했습니다.");
+      return;
+    }
     CommandManager.execute("이미지 삽입", () => {
       if (!findAssetById(asset.id)) state.assets.push(asset);
-      const imageUnit = {
-        id: uid("unit"),
-        type: "image",
-        assetId: asset.id,
-        path: imagePath,
-        caption: asset.name,
-        imageWidth: 100
-      };
-      if (block.type !== "generic") {
-        const original = structuredClone(block);
-        Object.keys(block).forEach(key => delete block[key]);
-        block.id = original.id;
-        block.type = "generic";
-        block.items = [blockToContentUnit(original)];
-      }
-      block.items = Array.isArray(block.items) ? block.items : [];
-      const unitIndex = unit ? block.items.findIndex(item => item.id === unit.id) : block.items.length - 1;
-      block.items.splice(unitIndex >= 0 ? unitIndex + 1 : block.items.length, 0, imageUnit);
+      targetBlock.content = `${targetBlock.content || ""}${targetBlock.content ? "\n" : ""}${imageMarkerForAsset(asset)}`;
     });
     pendingImageInsert = null;
     toast("이미지를 삽입했습니다.");
@@ -727,6 +1056,98 @@ async function insertSelectedImageFile(file) {
   });
   pendingImageInsert = null;
   toast("이미지를 업로드했습니다.");
+}
+
+function extensionForClipboardImage(type) {
+  const mime = String(type || "").toLowerCase();
+  if (mime.includes("jpeg") || mime.includes("jpg")) return "jpg";
+  if (mime.includes("webp")) return "webp";
+  if (mime.includes("gif")) return "gif";
+  if (mime.includes("bmp")) return "bmp";
+  return "png";
+}
+
+function namedClipboardImageFile(file, index) {
+  const name = String(file?.name || "").trim();
+  if (name && name !== "image.png") return file;
+  const suffix = new Date().toISOString().replace(/[:.]/g, "-");
+  const ext = extensionForClipboardImage(file?.type);
+  try {
+    return new File([file], `clipboard-image-${suffix}-${index + 1}.${ext}`, {
+      type: file.type || "image/png",
+      lastModified: Date.now()
+    });
+  } catch (_) {
+    return file;
+  }
+}
+
+function clipboardImageFiles(event) {
+  const data = event.clipboardData;
+  if (!data) return [];
+  const items = Array.from(data.items || []);
+  const itemFiles = items
+    .filter(item => item.kind === "file" && String(item.type || "").startsWith("image/"))
+    .map(item => item.getAsFile())
+    .filter(file => file && mediaKindForFile(file) === "image");
+  const files = itemFiles.length
+    ? itemFiles
+    : Array.from(data.files || []).filter(file => mediaKindForFile(file) === "image");
+  return files.map((file, index) => namedClipboardImageFile(file, index));
+}
+
+async function pasteClipboardImages(blockId, unitId, files, editable = null, range = null) {
+  const assets = [];
+  for (const file of files) {
+    assets.push(await createAssetFromFile(file));
+  }
+  if (editable && insertImageAssetsIntoEditable(editable, assets, range, "이미지 붙여넣기")) {
+    const hasSessionOnlyPreview = assets.some(asset => !asset.dataUrl);
+    if (hasSessionOnlyPreview) {
+      toast("큰 이미지는 현재 브라우저 세션에서만 미리 볼 수 있습니다.");
+    } else {
+      toast(assets.length > 1 ? `${assets.length}개 이미지를 붙여넣었습니다.` : "클립보드 이미지를 붙여넣었습니다.");
+    }
+    return;
+  }
+  CommandManager.execute("이미지 붙여넣기", () => {
+    const block = findBlockById(blockId);
+    if (!block) return;
+    assets.forEach(asset => {
+      if (!findAssetById(asset.id)) state.assets.push(asset);
+    });
+    const targetBlock = unitId ? block.items?.find(item => item.id === unitId) : block;
+    if (targetBlock && "content" in targetBlock) {
+      const markers = assets.map(imageMarkerForAsset).join("\n");
+      targetBlock.content = `${targetBlock.content || ""}${targetBlock.content ? "\n" : ""}${markers}`;
+      return;
+    }
+    if (block.type !== "generic") {
+      const original = structuredClone(block);
+      Object.keys(block).forEach(key => delete block[key]);
+      block.id = original.id;
+      block.type = "generic";
+      block.items = [blockToContentUnit(original)];
+    }
+    block.items = Array.isArray(block.items) ? block.items : [];
+    const unitIndex = unitId ? block.items.findIndex(item => item.id === unitId) : -1;
+    const insertAt = unitIndex >= 0 ? unitIndex + 1 : block.items.length;
+    const imageUnits = assets.map(asset => ({
+      id: uid("unit"),
+      type: "image",
+      assetId: asset.id,
+      path: assetPath(asset.id),
+      caption: asset.name,
+      imageWidth: 100
+    }));
+    block.items.splice(insertAt, 0, ...imageUnits);
+  });
+  const hasSessionOnlyPreview = assets.some(asset => !asset.dataUrl);
+  if (hasSessionOnlyPreview) {
+    toast("큰 이미지는 현재 브라우저 세션에서만 미리 볼 수 있습니다.");
+  } else {
+    toast(assets.length > 1 ? `${assets.length}개 이미지를 붙여넣었습니다.` : "클립보드 이미지를 붙여넣었습니다.");
+  }
 }
 
 function clearDropMarkers(includeDragging = false) {
@@ -1114,12 +1535,17 @@ function applyImageResizeFromEvent(event) {
 }
 
 els.blocks.addEventListener("pointerdown", event => {
+  if (beginDrawingStroke(event)) return;
   if (beginImageResize(event)) return;
   if (beginContentUnitDrag(event)) return;
   beginPendingBlockDrag(event);
 });
 
 document.addEventListener("pointermove", event => {
+  if (drawingStrokeState.active) {
+    applyDrawingStroke(event);
+    return;
+  }
   updateContentUnitDragTarget(event);
   if (imageResizeState.usingMouse) return;
   applyImageResizeFromEvent(event);
@@ -1144,10 +1570,12 @@ function finishImageResize() {
 }
 
 document.addEventListener("pointerup", event => {
+  if (finishDrawingStroke(event)) return;
   finishImageResize();
   finishContentUnitDrag(event);
 });
 document.addEventListener("pointercancel", event => {
+  if (finishDrawingStroke(event)) return;
   finishImageResize();
   finishContentUnitDrag(event);
 });
@@ -1587,7 +2015,6 @@ const MEETING_SHEET_COLUMNS = Object.freeze([
   "안건",
   "회의록",
   "결정사항",
-  "액션아이템",
   "상태",
   "작성일"
 ]);
@@ -1618,6 +2045,13 @@ function ensureMeetingDataset(sheet = "회의록") {
   return { sheetName, rows: state.datasets[sheetName], header };
 }
 
+function selectAllMeetingAttendees(button) {
+  const panel = button?.closest("[data-meeting-panel]");
+  const inputs = Array.from(panel?.querySelectorAll("[data-meeting-attendee]") || []);
+  inputs.forEach(input => input.checked = true);
+  if (inputs.length) toast("참석자를 모두 선택했습니다.");
+}
+
 function createMeetingFromPanel(panel) {
   if (!panel) return false;
   const meetingSheet = panel.dataset.meetingSheet || "회의록";
@@ -1636,11 +2070,13 @@ function createMeetingFromPanel(panel) {
     toast("회의 참석자를 선택해주세요.");
     return false;
   }
-  const status = String(panel.querySelector("[data-meeting-status]")?.value || "예정").trim() || "예정";
+  const selectedStatus = String(panel.querySelector("[data-meeting-status]")?.value || "예정").trim() || "예정";
+  const status = typeof displayMeetingStatus === "function"
+    ? displayMeetingStatus(selectedStatus, dateKey, time)
+    : selectedStatus;
   const agenda = String(panel.querySelector("[data-meeting-agenda]")?.value || "").trim();
   const minutes = String(panel.querySelector("[data-meeting-minutes]")?.value || "").trim();
   const decisions = String(panel.querySelector("[data-meeting-decisions]")?.value || "").trim();
-  const actions = String(panel.querySelector("[data-meeting-actions]")?.value || "").trim();
   CommandManager.execute("회의록 저장", () => {
     const dataset = ensureMeetingDataset(meetingSheet);
     const values = {
@@ -1652,7 +2088,6 @@ function createMeetingFromPanel(panel) {
       "안건": agenda,
       "회의록": minutes,
       "결정사항": decisions,
-      "액션아이템": actions,
       "상태": status,
       "작성일": currentDateKey()
     };
@@ -1680,6 +2115,26 @@ els.blocks.addEventListener("input", event => {
   const targetBlock = contentTargetFromEvent(event) || block;
   const targetKey = targetBlock === block ? "block" : targetBlock.id;
   const field = event.target.dataset.field;
+  if (event.target.matches("[data-drawing-color]")) {
+    const info = drawingTargetFromElement(event.target);
+    if (!info) return;
+    CommandManager.beginDraft("그림판 색상 변경", `block:${block.id}:${targetKey}:drawing-color`);
+    info.target.brushColor = safeDrawingControlColor(event.target.value);
+    scheduleSave();
+    return;
+  }
+  if (event.target.matches("[data-drawing-size]")) {
+    const info = drawingTargetFromElement(event.target);
+    if (!info) return;
+    const size = safeDrawingControlSize(event.target.value);
+    CommandManager.beginDraft("그림판 굵기 변경", `block:${block.id}:${targetKey}:drawing-size`);
+    info.target.brushSize = size;
+    event.target.value = String(size);
+    const output = event.target.closest(".drawing-size-control")?.querySelector("output");
+    if (output) output.textContent = String(size);
+    scheduleSave();
+    return;
+  }
   if (field) {
     CommandManager.beginDraft(`${labelForType(targetBlock.type)} 수정`, `block:${block.id}:${targetKey}:${field}`);
     targetBlock[field] = field === "content" && event.target.classList.contains("editable")
@@ -1856,6 +2311,12 @@ els.blocks.addEventListener("click", event => {
     applyParagraphAlign(inlineAlignButton);
     return;
   }
+  const editableMediaDeleteButton = event.target.closest("[data-editable-media-delete]");
+  if (editableMediaDeleteButton) {
+    event.preventDefault();
+    deleteEditableMedia(editableMediaDeleteButton);
+    return;
+  }
   const wikiHomeButton = event.target.closest("[data-wiki-home]");
   if (wikiHomeButton) {
     openWikiHome();
@@ -1878,6 +2339,11 @@ els.blocks.addEventListener("click", event => {
   const termButton = event.target.closest("[data-term]");
   if (termButton) {
     openTermPage(termButton.dataset.term);
+    return;
+  }
+  const meetingAttendeeAllButton = event.target.closest("[data-meeting-attendee-all]");
+  if (meetingAttendeeAllButton) {
+    selectAllMeetingAttendees(meetingAttendeeAllButton);
     return;
   }
   const taskCreateButton = event.target.closest("[data-task-create]");
@@ -1937,6 +2403,27 @@ els.blocks.addEventListener("click", event => {
     );
     return;
   }
+  const drawingToolButton = event.target.closest("[data-drawing-tool]");
+  if (drawingToolButton) {
+    if (!isEditing) return;
+    event.preventDefault();
+    setDrawingTool(drawingToolButton, drawingToolButton.dataset.drawingTool);
+    return;
+  }
+  const drawingUndoButton = event.target.closest("[data-drawing-undo]");
+  if (drawingUndoButton) {
+    if (!isEditing) return;
+    event.preventDefault();
+    restoreDrawingHistory(drawingTargetFromElement(drawingUndoButton));
+    return;
+  }
+  const drawingClearButton = event.target.closest("[data-drawing-clear]");
+  if (drawingClearButton) {
+    if (!isEditing) return;
+    event.preventDefault();
+    clearDrawingBoard(drawingClearButton);
+    return;
+  }
   if (!isEditing) return;
   const article = event.target.closest("[data-block-id]");
   const block = currentBlockFromEvent(event);
@@ -1950,6 +2437,14 @@ els.blocks.addEventListener("click", event => {
   }
   if (event.target.matches("[data-selected-term-create]")) {
     createKeywordFromSelection(block.id);
+    return;
+  }
+  if (event.target.matches("[data-image-remove]")) {
+    if (unit) {
+      deleteContentUnit(block, unit.id);
+    } else {
+      deleteBlock(block.id);
+    }
     return;
   }
   if (event.target.matches("[data-image-file-select]")) {
@@ -2048,10 +2543,10 @@ els.redoCommand.addEventListener("click", () => CommandManager.redo());
 document.getElementById("manualSave").addEventListener("click", saveProjectToFile);
 document.getElementById("exportJson").addEventListener("click", exportJson);
 document.getElementById("exportHtml").addEventListener("click", exportCurrentHtml);
+document.getElementById("exportMarkdown").addEventListener("click", exportMarkdown);
 document.getElementById("exportSheetCsv")?.addEventListener("click", () => { exportSelectedCsv(); toast("CSV 파일을 저장했습니다."); });
 document.getElementById("exportWorkbook")?.addEventListener("click", exportWorkbook);
 els.deleteDatasetSheet?.addEventListener("click", deleteDatasetSheet);
-document.getElementById("printView").addEventListener("click", () => { toast("인쇄 화면을 준비합니다."); setTimeout(() => window.print(), 300); });
 document.getElementById("openTerms").addEventListener("click", () => openTermPanel(""));
 document.getElementById("closeTerms").addEventListener("click", closeTermPanel);
 document.getElementById("saveTerm").addEventListener("click", saveTermFromForm);
@@ -2190,6 +2685,24 @@ els.blocks.addEventListener("focusin", event => {
     const [r, c] = datasetCell.split(":").map(Number);
     lastFocusedTableCell = { blockId: targetBlock?.id || block?.id || "", row: r, col: c, type: "dataset" };
   }
+});
+
+els.blocks.addEventListener("paste", event => {
+  if (!isEditing) return;
+  const editable = event.target.closest('[data-field="content"].editable');
+  if (!editable || editable.closest("table")) return;
+  const block = currentBlockFromEvent(event);
+  if (!block) return;
+  const files = clipboardImageFiles(event);
+  if (!files.length) return;
+  const range = editableRange(editable);
+  event.preventDefault();
+  hideSlashPalette();
+  const unit = contentUnitFromElement(editable);
+  pasteClipboardImages(block.id, unit?.id || "", files, editable, range).catch(err => {
+    console.error(err);
+    toast("클립보드 이미지를 붙여넣지 못했습니다.");
+  });
 });
 
 // Input handling for slash command /

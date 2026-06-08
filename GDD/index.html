@@ -9,7 +9,7 @@
     import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
     window.mermaid = mermaid;
   </script>
-  <link rel="stylesheet" href="../assets/css/shimroom.css?v=table-image-20260601">
+  <link rel="stylesheet" href="../assets/css/shimroom.css?v=drawing-board-20260606">
 </head>
 <body class="view-mode">
   <header class="topbar">
@@ -36,8 +36,8 @@
       <button id="manualSave" class="edit-only">파일 저장</button>
       <button id="exportJson" class="edit-only">JSON 내보내기</button>
       <button id="exportHtml">HTML 내보내기</button>
+      <button id="exportMarkdown">마크다운으로 출력하기</button>
       <label class="file-button edit-only">가져오기<input id="importProject" type="file" accept=".json,.html,application/json,text/html"></label>
-      <button id="printView">인쇄</button>
     </div>
   </header>
 
@@ -119,13 +119,14 @@
 
   <script src="../assets/data/project-data.js?v=collab-rules-20260601"></script>
 
-  <script src="../assets/js/shimroom-core.js?v=tab-repair-20260601"></script>
+  <script src="../assets/js/shimroom-core.js?v=drawing-board-20260606"></script>
   <script src="../assets/js/shimroom-media.js?v=table-image-20260601"></script>
-  <script src="../assets/js/shimroom-spreadsheet.js?v=table-image-20260601"></script>
+  <script src="../assets/js/shimroom-spreadsheet.js?v=meeting-updates-20260602"></script>
   <script src="../assets/js/shimroom-versioning.js"></script>
-  <script src="../assets/js/shimroom-render.js?v=unit-drag-20260601"></script>
-  <script src="../assets/js/shimroom-actions.js?v=subtabs-20260601"></script>
+  <script src="../assets/js/shimroom-render.js?v=drawing-board-20260606"></script>
+  <script src="../assets/js/shimroom-actions.js?v=markdown-export-20260602"></script>
   <script src="../assets/js/shimroom-wiki.js?v=wiki-manual-20260601c"></script>
-  <script src="../assets/js/shimroom-events.js?v=unit-drag-20260601"></script>
+  <script src="../assets/js/shimroom-events.js?v=drawing-board-20260606"></script>
+  <script src="../assets/js/shimroom-collab.js?v=collab-20260602"></script>
 </body>
 </html>

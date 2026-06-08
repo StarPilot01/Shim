@@ -597,6 +597,237 @@ function exportCurrentHtml() {
   downloadBlob("shimroom_plan_tool_export.html", html, "text/html;charset=utf-8");
 }
 
+function markdownRichText(value) {
+  let text = String(value ?? "").replace(/\r\n/g, "\n");
+  let previous = "";
+  while (previous !== text) {
+    previous = text;
+    text = text.replace(/\[\[(?:size|align|color|mark):[^\]|]+\|([\s\S]*?)\]\]/gi, "$1");
+  }
+  text = text.replace(/\[\[math:([\s\S]*?)\]\]/gi, (_match, expression) => `$${String(expression).trim()}$`);
+  text = text.replace(/\[\[image:(.+?)(?:\|([^\]]*))?\]\]/gi, (_match, path, caption) => markdownImage(path, caption));
+  text = text.replace(/\[\[(?:video|file):(.+?)(?:\|([^\]]*))?\]\]/gi, (_match, path, caption) => markdownLink(path, caption));
+  return text.replace(/\[\[([^\]\|\n]+)(?:\|([^\]\n]+))?\]\]/g, (_match, target, label) => markdownRichText(label || target));
+}
+
+function markdownText(value) {
+  return markdownRichText(value).split("\n").map(line => line.trimEnd()).join("\n").trim();
+}
+
+function markdownLinkLabel(value) {
+  return markdownRichText(value).replace(/[\[\]]/g, "\\$&").trim() || "link";
+}
+
+function markdownPathFromValue(value) {
+  const raw = String(value || "").trim();
+  const asset = typeof assetFromPath === "function" ? assetFromPath(raw) : null;
+  const path = asset?.name || raw;
+  if (!path) return "";
+  return /\s/.test(path) ? `<${path.replace(/[<>]/g, "")}>` : path.replace(/\)/g, "%29");
+}
+
+function markdownLink(path, label = "") {
+  const href = markdownPathFromValue(path);
+  return href ? `[${markdownLinkLabel(label || path)}](${href})` : markdownLinkLabel(label || path);
+}
+
+function markdownImage(path, caption = "") {
+  const src = markdownPathFromValue(path);
+  return src ? `![${markdownLinkLabel(caption || path)}](${src})` : markdownLinkLabel(caption || path);
+}
+
+function markdownHeading(value, level = 2) {
+  const title = markdownText(value).replace(/^#{1,6}\s+/, "").trim();
+  if (!title) return "";
+  const safeLevel = Math.max(1, Math.min(6, level));
+  return `${"#".repeat(safeLevel)} ${title}`;
+}
+
+function markdownHeadingBlock(block, level) {
+  const lines = markdownText(block.content || "").split("\n");
+  const title = lines.shift() || "";
+  const body = lines.join("\n").trim();
+  return [markdownHeading(title, level), body].filter(Boolean).join("\n\n");
+}
+
+function markdownQuote(value, prefix = "") {
+  const text = markdownText(value);
+  if (!text) return "";
+  const lines = text.split("\n").map(line => line ? `> ${line}` : ">");
+  return prefix ? [`> ${prefix}`, ...lines].join("\n") : lines.join("\n");
+}
+
+function markdownFence(value, language = "") {
+  const content = String(value ?? "").replace(/\r\n/g, "\n").trimEnd();
+  const longestTicks = [...content.matchAll(/`+/g)].reduce((max, match) => Math.max(max, match[0].length), 0);
+  const fence = "`".repeat(Math.max(3, longestTicks + 1));
+  const safeLanguage = String(language || "").trim().replace(/[`\s]+/g, "");
+  return `${fence}${safeLanguage}\n${content}\n${fence}`;
+}
+
+function markdownTableCell(value) {
+  return markdownRichText(value)
+    .replace(/\r?\n+/g, "<br>")
+    .replace(/\|/g, "\\|")
+    .trim();
+}
+
+function markdownTable(rows) {
+  const normalized = ensureRows(rows)
+    .map(row => row.map(cell => String(cell ?? "")))
+    .filter(row => row.some(cell => cell.trim()));
+  if (!normalized.length) return "";
+  const columnCount = Math.max(1, ...normalized.map(row => row.length));
+  const padded = normalized.map(row => Array.from({ length: columnCount }, (_item, index) => markdownTableCell(row[index] || "")));
+  const header = padded[0];
+  const separator = Array.from({ length: columnCount }, () => "---");
+  const body = padded.slice(1);
+  return [
+    `| ${header.join(" | ")} |`,
+    `| ${separator.join(" | ")} |`,
+    ...body.map(row => `| ${row.join(" | ")} |`)
+  ].join("\n");
+}
+
+function markdownRowsForDataset(sheetName, rows) {
+  const normalized = ensureRows(rows);
+  if (String(sheetName || "").trim() !== "회의록") return normalized;
+  const headerIndex = sheetHeaderIndex(normalized, "회의ID");
+  if (headerIndex < 0) return normalized;
+  const header = normalized[headerIndex].map(cell => String(cell || "").trim());
+  const dateIndex = calendarColumnIndex(header, ["일자", "날짜"], -1);
+  const timeIndex = calendarColumnIndex(header, ["시간"], -1);
+  const statusIndex = calendarColumnIndex(header, ["상태"], -1);
+  const columns = header
+    .map((cell, index) => ({ cell, index }))
+    .filter(item => item.cell !== "액션아이템")
+    .map(item => item.index);
+  return normalized.map(row => columns.map(index => {
+    if (index === statusIndex && typeof displayMeetingStatus === "function") {
+      return displayMeetingStatus(
+        row[index],
+        dateIndex >= 0 ? row[dateIndex] : "",
+        timeIndex >= 0 ? row[timeIndex] : ""
+      );
+    }
+    return row[index] ?? "";
+  }));
+}
+
+function markdownMediaPath(block) {
+  const asset = typeof assetFromBlock === "function" ? assetFromBlock(block) : null;
+  const path = String(block.path || "").trim();
+  if (path && !path.startsWith("asset:")) return path;
+  return asset?.name || path;
+}
+
+function markdownDataset(sheetName, title = "", level = 3) {
+  const sheet = String(sheetName || "").trim();
+  const table = sheet && state.datasets[sheet] ? markdownTable(markdownRowsForDataset(sheet, state.datasets[sheet])) : "";
+  if (!table) return title ? markdownHeading(title, level) : "";
+  return [
+    title ? markdownHeading(title, level) : "",
+    `시트: ${sheet}`,
+    table
+  ].filter(Boolean).join("\n\n");
+}
+
+function markdownDataBlock(block, level, title, sheetNames) {
+  const pieces = [markdownHeading(title || labelForType(block.type), level)];
+  sheetNames
+    .map(sheet => String(sheet || "").trim())
+    .filter((sheet, index, list) => sheet && list.indexOf(sheet) === index)
+    .forEach(sheet => pieces.push(markdownDataset(sheet, sheet, Math.min(6, level + 1))));
+  return pieces.filter(Boolean).join("\n\n");
+}
+
+function markdownBlock(block, parentLevel = 2) {
+  if (!block) return "";
+  const childLevel = Math.min(6, parentLevel + 1);
+  const headingLevel = Math.min(6, parentLevel + Math.max(1, headingLevelFor(block) || 1));
+  if (block.type === "generic") {
+    return (block.items || []).map(unit => markdownBlock(unit, parentLevel)).filter(Boolean).join("\n\n");
+  }
+  if (block.type === "heading") return markdownHeadingBlock(block, headingLevel);
+  if (["text", "callout", "quote"].includes(block.type) && isHeadingLike(block)) return markdownHeadingBlock(block, headingLevel);
+  if (block.type === "text") return markdownText(block.content || "");
+  if (block.type === "callout") return markdownQuote(block.content || "", "[!NOTE]");
+  if (block.type === "quote") return markdownQuote(block.content || "");
+  if (block.type === "checklist") {
+    return (block.items || []).map(item => `- [${item.checked ? "x" : " "}] ${markdownRichText(item.text || "").trim()}`).join("\n");
+  }
+  if (block.type === "code") return markdownFence(block.content || "", block.language || "text");
+  if (block.type === "divider") return block.label ? `---\n\n_${markdownRichText(block.label)}_` : "---";
+  if (block.type === "table") return markdownTable(block.rows);
+  if (block.type === "dataset") {
+    const sheet = state.datasets[block.sheet] ? block.sheet : Object.keys(state.datasets)[0] || "";
+    return markdownDataset(sheet, block.title || block.sheet || "데이터", childLevel);
+  }
+  if (block.type === "flow") return markdownFence(block.content || "", "text");
+  if (block.type === "mermaid") return markdownFence(block.content || "", "mermaid");
+  if (block.type === "image") return markdownImage(markdownMediaPath(block), block.caption || "첨부 이미지");
+  if (block.type === "video") return markdownLink(markdownMediaPath(block), block.caption || "동영상");
+  if (block.type === "attachment") return markdownLink(markdownMediaPath(block), block.caption || "첨부 파일");
+  if (block.type === "dialogue") {
+    return markdownDataBlock(block, childLevel, block.title || "대화", [block.stageSheet || "온기단계", block.dialogueSheet || "대화노드"]);
+  }
+  if (block.type === "calendar") {
+    return markdownDataBlock(block, childLevel, block.title || "프로젝트 달력", [block.sheet || "프로젝트달력"]);
+  }
+  if (block.type === "team") {
+    return markdownDataBlock(block, childLevel, block.title || "팀원 목록", [block.sheet || "팀원목록"]);
+  }
+  if (block.type === "workboard") {
+    return markdownDataBlock(block, childLevel, block.title || "업무 관리", [block.teamSheet || "팀원목록", block.taskSheet || "업무목록"]);
+  }
+  if (block.type === "meetingbook") {
+    return markdownDataBlock(block, childLevel, block.title || "회의록", [block.sheet || "회의록", block.teamSheet || "팀원목록"]);
+  }
+  return markdownText(block.content || block.caption || block.label || labelForType(block.type));
+}
+
+function markdownTab(tab, depth = 0) {
+  const level = Math.min(6, 2 + depth);
+  const pieces = [
+    markdownHeading(tab.title || "제목 없음", level),
+    tab.subtitle ? markdownText(tab.subtitle) : ""
+  ];
+  (tab.blocks || []).forEach(block => pieces.push(markdownBlock(block, level)));
+  return pieces.filter(Boolean).join("\n\n");
+}
+
+function markdownGlossary() {
+  const terms = typeof sortedTerms === "function" ? sortedTerms() : [...(state.glossary || [])];
+  if (!terms.length) return "";
+  const lines = terms.map(term => {
+    const aliases = Array.isArray(term.aliases) && term.aliases.length ? ` (별칭: ${term.aliases.join(", ")})` : "";
+    const category = term.category ? ` - ${term.category}` : "";
+    return `- **${markdownRichText(term.keyword || "").trim()}**${aliases}${category}: ${markdownRichText(term.description || "").trim()}`;
+  });
+  return [markdownHeading("용어 사전", 2), ...lines].join("\n");
+}
+
+function buildProjectMarkdown() {
+  const title = state.title || state.appTitle || DEFAULT_APP_TITLE;
+  const tabItems = typeof tabTreeItems === "function"
+    ? tabTreeItems()
+    : documentTabs().map(tab => ({ tab, depth: 0 }));
+  return [
+    markdownHeading(title, 1),
+    state.subtitle ? markdownText(state.subtitle) : "",
+    ...tabItems.map(({ tab, depth }) => markdownTab(tab, depth)),
+    markdownGlossary()
+  ].filter(Boolean).join("\n\n").replace(/\n{3,}/g, "\n\n") + "\n";
+}
+
+function exportMarkdown() {
+  CommandManager.commitDraft({ render: false });
+  saveNow();
+  const filename = safeExportName(state.title || state.appTitle || "shimroom_gdd", "md");
+  downloadBlob(filename, "\ufeff" + buildProjectMarkdown(), "text/markdown;charset=utf-8");
+  toast("마크다운 파일을 내려받았습니다.");
+}
+
 function exportWorkbook() {
   CommandManager.commitDraft({ render: false });
   if (!window.XLSX) {

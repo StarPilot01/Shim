@@ -92,6 +92,25 @@ function renderSheetCellValue(cell, rows) {
   return `<span class="formula-result" title="${escapeHtml(value)}">${escapeHtml(computed)}</span>`;
 }
 
+function displaySheetCellValue(cell, rows, row, columnIndex) {
+  if (!isEditing && typeof displayMeetingStatus === "function") {
+    const normalized = ensureRows(rows);
+    const header = normalized[detectHeaderIndex(normalized)] || [];
+    const labels = header.map(value => String(value || "").trim());
+    if (labels.includes("회의ID") && labels[columnIndex] === "상태") {
+      const dateIndex = calendarColumnIndex(labels, ["일자", "날짜"], -1);
+      const timeIndex = calendarColumnIndex(labels, ["시간"], -1);
+      const status = displayMeetingStatus(
+        cell,
+        dateIndex >= 0 ? row[dateIndex] : "",
+        timeIndex >= 0 ? row[timeIndex] : ""
+      );
+      return renderRichContent(status);
+    }
+  }
+  return renderSheetCellValue(cell, rows);
+}
+
 function renderSheetCellMediaPreview(cell) {
   const media = String(cell ?? "")
     .split(/\n+/)
@@ -146,11 +165,26 @@ function rowsForSheetView(rows, block) {
   return { rows: [...pinned, ...body], headerIndex };
 }
 
-function renderSheetTools(block, kind, rows, sheetName = "") {
+function hiddenColumnSet(hiddenColumns = []) {
+  return new Set(hiddenColumns.map(column => String(column || "").trim()).filter(Boolean));
+}
+
+function visibleColumnIndexes(rows, hiddenColumns = []) {
+  const normalized = ensureRows(rows);
+  const columnCount = Math.max(1, ...normalized.map(row => row.length));
+  const header = normalized[detectHeaderIndex(normalized)] || normalized[0] || [];
+  const hidden = hiddenColumnSet(hiddenColumns);
+  const indexes = Array.from({ length: columnCount }, (_item, index) => index)
+    .filter(index => !hidden.has(String(header[index] || "").trim()));
+  return indexes.length ? indexes : Array.from({ length: columnCount }, (_item, index) => index);
+}
+
+function renderSheetTools(block, kind, rows, sheetName = "", hiddenColumns = []) {
   const normalized = ensureRows(rows);
   const header = normalized[detectHeaderIndex(normalized)] || normalized[0] || [];
   const actionName = kind === "dataset" ? "dataset" : "table";
-  const columnOptions = header.map((cell, index) => {
+  const columnOptions = visibleColumnIndexes(normalized, hiddenColumns).map(index => {
+    const cell = header[index];
     const label = String(cell || sheetColumnLabel(index)).slice(0, 40);
     return `<option value="${index}" ${block.sortColumn === index ? "selected" : ""}>${escapeHtml(label)}</option>`;
   }).join("");
@@ -186,20 +220,20 @@ function renderSheetTools(block, kind, rows, sheetName = "") {
   `;
 }
 
-function renderSheetTable(rows, block, dataAttr) {
+function renderSheetTable(rows, block, dataAttr, hiddenColumns = []) {
   const view = rowsForSheetView(rows, block);
   const normalized = ensureRows(rows);
-  const columnCount = Math.max(1, ...normalized.map(row => row.length));
-  const columnHeaders = Array.from({ length: columnCount }, (_, c) => `
+  const columns = visibleColumnIndexes(normalized, hiddenColumns);
+  const columnHeaders = columns.map(c => `
     <th class="sheet-column-index" scope="col">${sheetColumnLabel(c)}</th>
   `).join("");
   const body = view.rows.map(item => `<tr class="${item.isHeader ? "sheet-header-row" : ""}">
     <th class="sheet-row-index" scope="row">${item.sourceIndex + 1}</th>
-    ${Array.from({ length: columnCount }, (_, c) => {
+    ${columns.map(c => {
     const cell = item.row[c] ?? "";
     const cellHtml = isEditing
       ? `${escapeEditable(cell)}${renderSheetCellMediaPreview(cell)}<div class="resize-handle"></div>`
-      : renderSheetCellValue(cell, rows);
+      : displaySheetCellValue(cell, rows, item.row, c);
     return `<td contenteditable="${editAttr()}" data-${dataAttr}="${item.sourceIndex}:${c}">${cellHtml}</td>`;
   }).join("")}</tr>`).join("");
   return `

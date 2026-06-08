@@ -289,6 +289,30 @@ body.edit-mode .mode-option.edit {
   font-weight: 700;
 }
 
+.collab-status {
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid #b7cdc4;
+  border-radius: 999px;
+  background: #edf5f1;
+  color: #173f34;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.collab-status.syncing {
+  border-color: #d7c378;
+  background: #fff8df;
+  color: #5f4b17;
+}
+
+.collab-status.offline {
+  border-color: #d8cbc7;
+  background: #fbf2f0;
+  color: #8a3f37;
+}
+
 .command-controls {
   display: inline-flex;
   align-items: center;
@@ -1428,6 +1452,69 @@ body.content-unit-dragging {
   font-size: 13px;
 }
 
+.editable-media {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+  max-width: 100%;
+  user-select: none;
+}
+
+.editable-media-preview {
+  display: block;
+  max-width: 100%;
+}
+
+.editable-media img {
+  display: block;
+  width: 100%;
+  max-height: 520px;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f1f4f2;
+}
+
+.editable-media-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.editable-media-caption {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editable-media-delete {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 3px 9px;
+  border-color: rgba(163, 63, 54, 0.28);
+  background: #fff7f5;
+  color: #a33f36;
+  font-size: 12px;
+}
+
+.editable-media-delete:hover {
+  background: #f8dfda;
+}
+
+.editable-media-empty {
+  display: block;
+  padding: 14px;
+  border: 1px dashed var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  background: #f6f8f6;
+}
+
 .term-link {
   display: inline;
   font: inherit;
@@ -1770,6 +1857,94 @@ body.image-resizing {
 .image-frame > small,
 .image-frame .caption {
   justify-self: stretch;
+}
+
+.drawing-board {
+  display: grid;
+  gap: 10px;
+}
+
+.drawing-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.drawing-toolbar button.active {
+  border-color: var(--accent);
+  background: #edf5f1;
+  color: #173f34;
+}
+
+.drawing-control {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.drawing-control input[type="color"] {
+  width: 30px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.drawing-size-control input {
+  width: 110px;
+}
+
+.drawing-size-control output {
+  min-width: 22px;
+  color: #253029;
+  text-align: right;
+}
+
+.drawing-canvas-wrap {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+}
+
+.drawing-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.drawing-view {
+  display: grid;
+  gap: 7px;
+  margin: 10px 0;
+}
+
+.drawing-view img {
+  display: block;
+  width: 100%;
+  max-height: 560px;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+}
+
+.drawing-view figcaption {
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .caption {
@@ -2751,6 +2926,16 @@ select, .text-field {
   font-weight: 900;
   cursor: pointer;
   user-select: none;
+}
+
+.meeting-attendee-all {
+  min-height: 32px;
+  padding: 4px 10px;
+  border-color: #b7cdc4;
+  background: #edf5f1;
+  color: #173f34;
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .meeting-attendee-option input {
