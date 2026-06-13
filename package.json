@@ -1,0 +1,17 @@
+{
+  "name": "shim-gdd-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node collab-server.mjs",
+    "start:lan": "node collab-server.mjs 8770 0.0.0.0",
+    "user:create": "node scripts/create-user.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "mysql2": "^3.11.5"
+  }
+}

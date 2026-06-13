@@ -4,12 +4,18 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { extname, join, normalize, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
+import { createSessionToken } from "./server/auth-crypto.mjs";
+import { createAuthStore } from "./server/mysql-auth.mjs";
 
 const rootDir = fileURLToPath(new URL(".", import.meta.url));
 const collabDir = join(rootDir, ".collab");
 const stateFile = join(collabDir, "project-state.json");
 const port = Number(process.env.PORT || process.argv[2] || 8770);
 const host = process.env.HOST || process.argv[3] || "127.0.0.1";
+const cookieName = process.env.SESSION_COOKIE || "shim_session";
+const authDisabled = process.env.AUTH_DISABLED === "1";
+const sessionDays = Number(process.env.SESSION_DAYS || 14);
+const sessionMaxAgeMs = Math.max(1, sessionDays) * 24 * 60 * 60 * 1000;
 const clients = new Map();
 const streams = new Set();
 
@@ -29,6 +35,15 @@ const mimeTypes = {
 };
 
 let doc = await loadDocument();
+let authStore = null;
+
+if (!authDisabled) {
+  authStore = await createAuthStore(process.env);
+  await authStore.deleteExpiredSessions();
+  setInterval(() => {
+    authStore.deleteExpiredSessions().catch(err => console.warn("Could not delete expired sessions.", err));
+  }, 60 * 60 * 1000);
+}
 
 async function loadInitialState() {
   const source = await readFile(join(rootDir, "assets", "data", "project-data.js"), "utf8");
@@ -77,7 +92,7 @@ function sendJson(res, status, value) {
   res.end(body);
 }
 
-function readBody(req, limit = 25 * 1024 * 1024) {
+function readRawBody(req, limit = 25 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     let body = "";
     req.setEncoding("utf8");
@@ -88,9 +103,207 @@ function readBody(req, limit = 25 * 1024 * 1024) {
         req.destroy();
       }
     });
-    req.on("end", () => resolve(body ? JSON.parse(body) : {}));
+    req.on("end", () => resolve(body));
     req.on("error", reject);
   });
+}
+
+async function readBody(req, limit = 25 * 1024 * 1024) {
+  const body = await readRawBody(req, limit);
+  return body ? JSON.parse(body) : {};
+}
+
+async function readFormBody(req, limit = 1024 * 1024) {
+  const body = await readRawBody(req, limit);
+  const contentType = String(req.headers["content-type"] || "").toLowerCase();
+  if (contentType.includes("application/json")) return body ? JSON.parse(body) : {};
+  return Object.fromEntries(new URLSearchParams(body));
+}
+
+function parseCookies(header = "") {
+  const cookies = {};
+  for (const part of String(header).split(";")) {
+    const index = part.indexOf("=");
+    if (index < 0) continue;
+    const key = part.slice(0, index).trim();
+    const value = part.slice(index + 1).trim();
+    if (key) cookies[key] = decodeURIComponent(value);
+  }
+  return cookies;
+}
+
+function cookieHeader(name, value, options = {}) {
+  const parts = [`${name}=${encodeURIComponent(value)}`, "Path=/", "HttpOnly", "SameSite=Lax"];
+  if (options.maxAge != null) parts.push(`Max-Age=${Math.max(0, Math.floor(options.maxAge))}`);
+  if (options.expires) parts.push(`Expires=${options.expires.toUTCString()}`);
+  if (process.env.COOKIE_SECURE === "1") parts.push("Secure");
+  return parts.join("; ");
+}
+
+function redirect(res, location, status = 303, headers = {}) {
+  res.writeHead(status, { location, "cache-control": "no-store", ...headers });
+  res.end();
+}
+
+function sanitizeNext(value) {
+  const next = String(value || "/GDD/index.html");
+  if (!next.startsWith("/") || next.startsWith("//") || next.startsWith("/api/auth/login")) return "/GDD/index.html";
+  return next;
+}
+
+function wantsJson(req) {
+  const accept = String(req.headers.accept || "");
+  const contentType = String(req.headers["content-type"] || "");
+  return accept.includes("application/json") || contentType.includes("application/json");
+}
+
+function isApiRequest(req) {
+  return String(req.url || "").startsWith("/api/");
+}
+
+function getSessionToken(req) {
+  return parseCookies(req.headers.cookie || "")[cookieName] || "";
+}
+
+async function currentUser(req) {
+  if (authDisabled) {
+    return { id: 0, username: "local", displayName: "Local user", role: "admin" };
+  }
+  return authStore.getSessionUser(getSessionToken(req));
+}
+
+function canEdit(user) {
+  return user && (user.role === "admin" || user.role === "editor");
+}
+
+function authRequired(req, res, url) {
+  if (wantsJson(req) || isApiRequest(req)) {
+    sendJson(res, 401, { ok: false, reason: "auth_required" });
+    return;
+  }
+  redirect(res, `/login?next=${encodeURIComponent(url.pathname + url.search)}`, 302);
+}
+
+function forbidden(res) {
+  sendJson(res, 403, { ok: false, reason: "forbidden" });
+}
+
+async function handleLogin(req, res) {
+  try {
+    const body = await readFormBody(req, 64 * 1024);
+    const username = String(body.username || "").trim();
+    const password = String(body.password || "");
+    const next = sanitizeNext(body.next);
+    const user = await authStore.verifyCredentials(username, password);
+
+    if (!user) {
+      if (wantsJson(req)) {
+        sendJson(res, 401, { ok: false, reason: "invalid_credentials" });
+      } else {
+        sendLoginPage(res, { next, error: "아이디 또는 비밀번호를 확인해주세요." });
+      }
+      return;
+    }
+
+    const token = createSessionToken();
+    await authStore.createSession(user.id, token, {
+      maxAgeMs: sessionMaxAgeMs,
+      userAgent: req.headers["user-agent"] || "",
+      ipAddress: clientIp(req)
+    });
+
+    const setCookie = cookieHeader(cookieName, token, { maxAge: sessionMaxAgeMs / 1000 });
+    if (wantsJson(req)) {
+      res.writeHead(200, {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+        "set-cookie": setCookie
+      });
+      res.end(JSON.stringify({ ok: true, user }));
+    } else {
+      redirect(res, next, 303, { "set-cookie": setCookie });
+    }
+  } catch (err) {
+    sendJson(res, 400, { ok: false, error: err.message || "Login failed." });
+  }
+}
+
+async function handleLogout(req, res) {
+  try {
+    if (!authDisabled) await authStore.deleteSession(getSessionToken(req));
+    const clearCookie = cookieHeader(cookieName, "", { maxAge: 0, expires: new Date(0) });
+    if (wantsJson(req)) {
+      res.writeHead(200, {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+        "set-cookie": clearCookie
+      });
+      res.end(JSON.stringify({ ok: true }));
+    } else {
+      redirect(res, "/login", 303, { "set-cookie": clearCookie });
+    }
+  } catch (err) {
+    sendJson(res, 400, { ok: false, error: err.message || "Logout failed." });
+  }
+}
+
+function sendLoginPage(res, options = {}) {
+  const next = escapeHtml(sanitizeNext(options.next));
+  const error = options.error ? `<p class="error">${escapeHtml(options.error)}</p>` : "";
+  res.writeHead(200, {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store"
+  });
+  res.end(`<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shim 로그인</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, Pretendard, system-ui, sans-serif; }
+    body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: #f5f7fb; color: #172033; }
+    main { width: min(92vw, 360px); padding: 28px; background: #fff; border: 1px solid #d8deea; border-radius: 8px; box-shadow: 0 14px 40px rgba(20, 31, 51, .08); }
+    h1 { margin: 0 0 6px; font-size: 24px; letter-spacing: 0; }
+    p { margin: 0 0 20px; color: #627089; }
+    label { display: grid; gap: 6px; margin-top: 14px; font-size: 13px; font-weight: 700; color: #344057; }
+    input { width: 100%; box-sizing: border-box; border: 1px solid #c9d1df; border-radius: 6px; padding: 11px 12px; font: inherit; }
+    button { width: 100%; margin-top: 20px; border: 0; border-radius: 6px; padding: 12px 14px; background: #2057a7; color: #fff; font: inherit; font-weight: 800; cursor: pointer; }
+    .error { padding: 10px 12px; border-radius: 6px; background: #fff1f1; color: #9b1c1c; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Shim 로그인</h1>
+    <p>문서 서버에 접근하려면 로그인하세요.</p>
+    ${error}
+    <form method="post" action="/api/auth/login">
+      <input type="hidden" name="next" value="${next}">
+      <label>아이디
+        <input name="username" autocomplete="username" required autofocus>
+      </label>
+      <label>비밀번호
+        <input name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit">로그인</button>
+    </form>
+  </main>
+</body>
+</html>`);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function clientIp(req) {
+  const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  return forwarded || req.socket.remoteAddress || "";
 }
 
 function pathKey(path) {
@@ -163,22 +376,23 @@ function broadcast(payload) {
   }
 }
 
-function touchClient(info = {}) {
+function touchClient(info = {}, user = null) {
   const id = String(info.clientId || "").trim();
   if (!id) return;
+  const name = user?.displayName || user?.username || info.clientName || info.name || "User";
   clients.set(id, {
     id,
-    name: String(info.clientName || info.name || "사용자").slice(0, 40),
+    name: String(name).slice(0, 40),
     tabTitle: String(info.tabTitle || "").slice(0, 80),
     editing: Boolean(info.editing),
     lastSeen: Date.now()
   });
 }
 
-async function handlePatch(req, res) {
+async function handlePatch(req, res, user) {
   try {
     const body = await readBody(req);
-    touchClient(body);
+    touchClient(body, user);
     const baseRevision = Number(body.baseRevision || 0);
     const changes = normalizedChanges(body.changes);
     if (!changes.length) {
@@ -210,10 +424,10 @@ async function handlePatch(req, res) {
   }
 }
 
-async function handlePresence(req, res) {
+async function handlePresence(req, res, user) {
   try {
     const body = await readBody(req, 1024 * 1024);
-    touchClient(body);
+    touchClient(body, user);
     broadcast({ type: "presence", presence: presencePayload() });
     sendJson(res, 200, { ok: true, presence: presencePayload() });
   } catch (err) {
@@ -221,12 +435,12 @@ async function handlePresence(req, res) {
   }
 }
 
-function handleEvents(req, res) {
+function handleEvents(req, res, user) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   touchClient({
     clientId: url.searchParams.get("clientId"),
     clientName: url.searchParams.get("clientName")
-  });
+  }, user);
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-store",
@@ -271,29 +485,73 @@ async function serveStatic(req, res) {
 }
 
 const server = createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  if (req.method === "GET" && url.pathname === "/api/collab/state") {
-    sendJson(res, 200, { ok: true, revision: doc.revision, state: doc.state, presence: presencePayload() });
-    return;
+  try {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+
+    if (req.method === "GET" && url.pathname === "/login") {
+      const user = await currentUser(req);
+      if (user) redirect(res, sanitizeNext(url.searchParams.get("next")), 302);
+      else sendLoginPage(res, { next: url.searchParams.get("next") });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/auth/login") {
+      if (authDisabled) {
+        redirect(res, sanitizeNext(url.searchParams.get("next")), 303);
+      } else {
+        await handleLogin(req, res);
+      }
+      return;
+    }
+
+    const user = await currentUser(req);
+
+    if (req.method === "GET" && url.pathname === "/api/auth/me") {
+      if (!user) authRequired(req, res, url);
+      else sendJson(res, 200, { ok: true, user });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/auth/logout") {
+      await handleLogout(req, res);
+      return;
+    }
+
+    if (!user) {
+      authRequired(req, res, url);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/collab/state") {
+      sendJson(res, 200, { ok: true, revision: doc.revision, state: doc.state, presence: presencePayload() });
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/collab/events") {
+      handleEvents(req, res, user);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/collab/patch") {
+      if (!canEdit(user)) {
+        forbidden(res);
+        return;
+      }
+      await handlePatch(req, res, user);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/collab/presence") {
+      await handlePresence(req, res, user);
+      return;
+    }
+    if (req.method === "GET" || req.method === "HEAD") {
+      await serveStatic(req, res);
+      return;
+    }
+    res.writeHead(405);
+    res.end("Method not allowed");
+  } catch (err) {
+    console.error("Request failed.", err);
+    sendJson(res, 500, { ok: false, error: "Internal server error." });
   }
-  if (req.method === "GET" && url.pathname === "/api/collab/events") {
-    handleEvents(req, res);
-    return;
-  }
-  if (req.method === "POST" && url.pathname === "/api/collab/patch") {
-    await handlePatch(req, res);
-    return;
-  }
-  if (req.method === "POST" && url.pathname === "/api/collab/presence") {
-    await handlePresence(req, res);
-    return;
-  }
-  if (req.method === "GET" || req.method === "HEAD") {
-    await serveStatic(req, res);
-    return;
-  }
-  res.writeHead(405);
-  res.end("Method not allowed");
 });
 
 setInterval(() => {
@@ -307,4 +565,5 @@ setInterval(() => {
 
 server.listen(port, host, () => {
   console.log(`Shim collaboration server: http://${host}:${port}/GDD/index.html`);
+  console.log(`Authentication: ${authDisabled ? "disabled" : "MySQL"}`);
 });

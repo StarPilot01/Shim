@@ -1,0 +1,25 @@
+[Unit]
+Description=Shim GDD collaboration server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/Shim
+Environment=HOST=0.0.0.0
+Environment=PORT=8770
+Environment=MYSQL_HOST=127.0.0.1
+Environment=MYSQL_PORT=3306
+Environment=MYSQL_USER=shim_app
+Environment=MYSQL_PASSWORD=change-this-password
+Environment=MYSQL_DATABASE=shim_gdd
+Environment=SESSION_DAYS=14
+# Enable this only when serving through HTTPS.
+# Environment=COOKIE_SECURE=1
+ExecStart=/usr/bin/node /home/ubuntu/Shim/collab-server.mjs
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
