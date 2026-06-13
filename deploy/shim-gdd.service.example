@@ -5,8 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=ubuntu
-WorkingDirectory=/home/ubuntu/Shim
+User=chan
+WorkingDirectory=/home/chan/Shim
 Environment=HOST=0.0.0.0
 Environment=PORT=8770
 Environment=MYSQL_HOST=127.0.0.1
@@ -17,7 +17,7 @@ Environment=MYSQL_DATABASE=shim_gdd
 Environment=SESSION_DAYS=14
 # Enable this only when serving through HTTPS.
 # Environment=COOKIE_SECURE=1
-ExecStart=/usr/bin/node /home/ubuntu/Shim/collab-server.mjs
+ExecStart=/usr/bin/node /home/chan/Shim/collab-server.mjs
 Restart=always
 RestartSec=3
 

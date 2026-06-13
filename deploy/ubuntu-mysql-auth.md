@@ -18,7 +18,7 @@ sudo mysql
 
 ```sql
 CREATE USER IF NOT EXISTS 'shim_app'@'localhost' IDENTIFIED BY 'replace-with-a-long-random-password';
-GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX ON shim_gdd.* TO 'shim_app'@'localhost';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, REFERENCES ON shim_gdd.* TO 'shim_app'@'localhost';
 FLUSH PRIVILEGES;
 EXIT;
 ```
@@ -66,21 +66,17 @@ Use `COOKIE_SECURE=1` only when the site is served over HTTPS.
 
 ## 6. GitHub Actions deployment
 
-Add these repository secrets in GitHub:
+For a self-hosted runner on the Ubuntu server, add these repository secrets in GitHub:
 
 ```text
-UBUNTU_HOST=your.server.ip.or.domain
-UBUNTU_USER=ubuntu
-UBUNTU_SSH_KEY=<private key allowed to SSH into the server>
-UBUNTU_APP_DIR=/home/ubuntu/Shim
-UBUNTU_PORT=22
+UBUNTU_APP_DIR=/home/chan/Shim
 UBUNTU_SERVICE_NAME=shim-gdd
 ```
 
-The deploy workflow uploads the repository contents over SSH, runs `npm ci --omit=dev`, and restarts `shim-gdd`.
+With a self-hosted runner on the Ubuntu server, the deploy workflow runs locally on that server, copies the repository contents into `UBUNTU_APP_DIR`, runs `npm ci --omit=dev`, and restarts `shim-gdd`.
 
 The deploy user must be able to restart only this service without an interactive password. One narrow sudoers rule is:
 
 ```text
-ubuntu ALL=NOPASSWD: /usr/bin/systemctl restart shim-gdd
+chan ALL=NOPASSWD: /usr/bin/systemctl restart shim-gdd
 ```

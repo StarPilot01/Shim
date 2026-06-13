@@ -12,12 +12,8 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, shim-ubuntu]
     env:
-      DEPLOY_HOST: ${{ secrets.UBUNTU_HOST }}
-      DEPLOY_USER: ${{ secrets.UBUNTU_USER }}
-      DEPLOY_KEY: ${{ secrets.UBUNTU_SSH_KEY }}
-      DEPLOY_PORT: ${{ secrets.UBUNTU_PORT || '22' }}
       APP_DIR: ${{ secrets.UBUNTU_APP_DIR }}
       SERVICE_NAME: ${{ secrets.UBUNTU_SERVICE_NAME || 'shim-gdd' }}
 
@@ -27,44 +23,25 @@ jobs:
 
       - name: Validate secrets
         run: |
-          test -n "$DEPLOY_HOST" || (echo "Missing UBUNTU_HOST" && exit 1)
-          test -n "$DEPLOY_USER" || (echo "Missing UBUNTU_USER" && exit 1)
-          test -n "$DEPLOY_KEY" || (echo "Missing UBUNTU_SSH_KEY" && exit 1)
           test -n "$APP_DIR" || (echo "Missing UBUNTU_APP_DIR" && exit 1)
 
-      - name: Configure SSH
+      - name: Deploy files
         run: |
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
-
-      - name: Create deployment archive
-        run: |
+          mkdir -p "$APP_DIR"
           tar \
             --exclude='.git' \
             --exclude='node_modules' \
             --exclude='.collab' \
             --exclude='test-results' \
             --exclude='shimroom_test_runner.html' \
-            -czf /tmp/shim-deploy.tgz .
+            -czf /tmp/shim-deploy-${GITHUB_SHA}.tgz .
+          tar -xzf /tmp/shim-deploy-${GITHUB_SHA}.tgz -C "$APP_DIR"
+          rm -f /tmp/shim-deploy-${GITHUB_SHA}.tgz
 
-      - name: Upload archive
+      - name: Install dependencies and restart
         run: |
-          scp -i ~/.ssh/deploy_key -P "$DEPLOY_PORT" /tmp/shim-deploy.tgz \
-            "$DEPLOY_USER@$DEPLOY_HOST:/tmp/shim-deploy-${GITHUB_SHA}.tgz"
-
-      - name: Deploy and restart
-        run: |
-          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-            "APP_DIR='$APP_DIR' SERVICE_NAME='$SERVICE_NAME' GITHUB_SHA='$GITHUB_SHA' bash -s" <<'REMOTE'
           set -euo pipefail
-          mkdir -p "$APP_DIR"
-          tar -xzf "/tmp/shim-deploy-${GITHUB_SHA}.tgz" -C "$APP_DIR"
-          rm -f "/tmp/shim-deploy-${GITHUB_SHA}.tgz"
           cd "$APP_DIR"
           npm ci --omit=dev
           sudo -n systemctl restart "$SERVICE_NAME"
           systemctl --no-pager --lines=30 status "$SERVICE_NAME"
-          REMOTE
