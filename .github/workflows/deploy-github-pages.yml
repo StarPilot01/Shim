@@ -1,0 +1,46 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v4
+      - name: Prepare static site
+        run: |
+          mkdir -p site
+          cp -R index.html shimroom_plan_tool.html GDD assets shimroom_data_sheets.xlsx site/
+          if [ -f "쉼청년과_함께_쉼표의_방_통합_기획서_v2.docx" ]; then
+            cp "쉼청년과_함께_쉼표의_방_통합_기획서_v2.docx" site/
+          fi
+          if [ -f ".nojekyll" ]; then
+            cp .nojekyll site/
+          fi
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          name: github-pages
+          path: site
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
