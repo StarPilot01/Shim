@@ -117,7 +117,9 @@ function rememberParagraphFormatSelection() {
   const blockEl = editable?.closest?.("[data-block-id]");
   const unitEl = editable?.closest?.("[data-unit-id]");
   if (!editable || !blockEl) return;
-  paragraphFormatRange = sel.getRangeAt(0).cloneRange();
+  const range = sel.getRangeAt(0);
+  if (!rangeBelongsToEditable(range, editable)) return;
+  paragraphFormatRange = range.cloneRange();
   paragraphFormatBlockId = unitEl?.dataset.unitId || blockEl.dataset.blockId || "";
 }
 
@@ -135,10 +137,14 @@ function restoreParagraphFormatSelection(editable) {
   const targetId = unitId || blockId;
   const sel = window.getSelection();
   editable.focus();
-  if (paragraphFormatRange && paragraphFormatBlockId === targetId) {
+  if (paragraphFormatRange && paragraphFormatBlockId === targetId && rangeBelongsToEditable(paragraphFormatRange, editable)) {
     sel.removeAllRanges();
     sel.addRange(paragraphFormatRange);
     return true;
+  }
+  if (paragraphFormatBlockId === targetId) {
+    paragraphFormatRange = null;
+    paragraphFormatBlockId = "";
   }
   const range = document.createRange();
   range.selectNodeContents(editable);
@@ -148,9 +154,34 @@ function restoreParagraphFormatSelection(editable) {
   return true;
 }
 
-function selectedParagraphText() {
+function rangeBelongsToEditable(range, editable) {
+  if (!range || !editable) return false;
+  const node = range.commonAncestorContainer;
+  const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+  return Boolean(element && (element === editable || editable.contains(element)));
+}
+
+function selectedParagraphText(editable = null) {
   const sel = window.getSelection();
-  return sel && sel.rangeCount ? sel.toString() : "";
+  if (!sel || sel.rangeCount === 0) return "";
+  const range = sel.getRangeAt(0);
+  if (editable && !rangeBelongsToEditable(range, editable)) return "";
+  return sel.toString();
+}
+
+function hasMeaningfulParagraphSelection(value) {
+  return String(value || "").replace(/\u00a0/g, " ").replace(/\u200b/g, "").trim().length > 0;
+}
+
+function normalizedParagraphSelectionText(value) {
+  return String(value || "").replace(/\u00a0/g, " ").replace(/\u200b/g, "").replace(/\s+/g, " ").trim();
+}
+
+function selectionCoversWholeParagraph(editable, selected) {
+  if (!editable || !hasMeaningfulParagraphSelection(selected)) return false;
+  const selectedText = normalizedParagraphSelectionText(selected);
+  const paragraphText = normalizedParagraphSelectionText(editable.innerText || editable.textContent || "");
+  return Boolean(selectedText && paragraphText && selectedText === paragraphText);
 }
 
 function serializeEditableContent(editable) {
@@ -458,7 +489,7 @@ function stripRichFormatting(value) {
 function wrapParagraphSelection(control, wrapperStart, wrapperEnd = wrapperStart, placeholder = "텍스트") {
   const editable = paragraphToolEditable(control);
   restoreParagraphFormatSelection(editable);
-  const selected = selectedParagraphText();
+  const selected = selectedParagraphText(editable);
   insertInlineMarkup(editable, `${wrapperStart}${selected || placeholder}${wrapperEnd}`);
 }
 
@@ -565,8 +596,8 @@ function applyParagraphSize(control) {
   const targetBlock = unit || block;
   const size = normalizeFontSize(control.value, paragraphFontSize(targetBlock));
   restoreParagraphFormatSelection(editable);
-  const selected = selectedParagraphText();
-  if (selected) {
+  const selected = selectedParagraphText(editable);
+  if (hasMeaningfulParagraphSelection(selected)) {
     document.execCommand(
       "insertHTML",
       false,
@@ -594,8 +625,8 @@ function applyParagraphHeadingLevel(control) {
   const targetBlock = unit || block;
   const level = normalizeHeadingLevel(control.dataset.inlineHeading ?? control.value, targetBlock.type);
   restoreParagraphFormatSelection(editable);
-  const selected = selectedParagraphText();
-  if (selected) {
+  const selected = selectedParagraphText(editable);
+  if (hasMeaningfulParagraphSelection(selected) && !selectionCoversWholeParagraph(editable, selected)) {
     const size = defaultFontSizeForTarget({ headingLevel: level });
     document.execCommand(
       "insertHTML",
@@ -930,7 +961,9 @@ function insertContentUnit(blockId, type, insertIndex) {
       block.items = [blockToContentUnit(original)];
     }
     block.items = Array.isArray(block.items) ? block.items : [];
-    const index = Math.max(0, Math.min(block.items.length, Number(insertIndex) || block.items.length));
+    const hasRequestedIndex = insertIndex !== null && insertIndex !== undefined && insertIndex !== "";
+    const requestedIndex = hasRequestedIndex ? Number(insertIndex) : NaN;
+    const index = Math.max(0, Math.min(block.items.length, Number.isFinite(requestedIndex) ? requestedIndex : block.items.length));
     const nextUnit = createContentUnit(type);
     insertedUnitId = nextUnit.id;
     block.items.splice(index, 0, nextUnit);
@@ -1706,6 +1739,7 @@ els.blocks.addEventListener("mousedown", event => {
   }
   if (event.target.closest("[data-inline-heading]")) {
     rememberParagraphFormatSelection();
+    event.preventDefault();
     return;
   }
   if (event.target.closest("[data-inline-align]")) {

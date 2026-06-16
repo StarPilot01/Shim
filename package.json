@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node collab-server.mjs",
     "start:lan": "node collab-server.mjs 8770 0.0.0.0",
+    "archive:build": "node scripts/build-notion-archive.mjs",
     "user:create": "node scripts/create-user.mjs"
   },
   "engines": {

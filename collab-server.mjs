@@ -10,6 +10,7 @@ import { createAuthStore } from "./server/mysql-auth.mjs";
 const rootDir = fileURLToPath(new URL(".", import.meta.url));
 const collabDir = join(rootDir, ".collab");
 const stateFile = join(collabDir, "project-state.json");
+const archiveStateFile = join(collabDir, "archive-state.json");
 const port = Number(process.env.PORT || process.argv[2] || 8770);
 const host = process.env.HOST || process.argv[3] || "127.0.0.1";
 const cookieName = process.env.SESSION_COOKIE || "shim_session";
@@ -35,6 +36,7 @@ const mimeTypes = {
 };
 
 let doc = await loadDocument();
+let archiveDoc = await loadArchiveDocument();
 let authStore = null;
 
 if (!authDisabled) {
@@ -50,6 +52,13 @@ async function loadInitialState() {
   const sandbox = { window: {} };
   vm.runInNewContext(source, sandbox, { filename: "project-data.js" });
   return structuredClone(sandbox.window.SHIMROOM_PROJECT_DATA || { tabs: [], datasets: {}, glossary: [] });
+}
+
+async function loadInitialArchiveState() {
+  const source = await readFile(join(rootDir, "assets", "data", "notion-archive-data.js"), "utf8");
+  const sandbox = { window: {} };
+  vm.runInNewContext(source, sandbox, { filename: "notion-archive-data.js" });
+  return structuredClone(sandbox.window.SHIM_NOTION_ARCHIVE || { documents: [], collections: [], media: [] });
 }
 
 async function loadDocument() {
@@ -77,10 +86,39 @@ async function loadDocument() {
   };
 }
 
+async function loadArchiveDocument() {
+  await mkdir(collabDir, { recursive: true });
+  if (existsSync(archiveStateFile)) {
+    try {
+      const saved = JSON.parse(await readFile(archiveStateFile, "utf8"));
+      if (saved && typeof saved === "object" && saved.state) {
+        return {
+          revision: Number(saved.revision || 0),
+          state: saved.state,
+          updatedAt: saved.updatedAt || new Date().toISOString()
+        };
+      }
+    } catch (err) {
+      console.warn("Could not read archive state. Starting from embedded data.", err);
+    }
+  }
+  return {
+    revision: 0,
+    state: await loadInitialArchiveState(),
+    updatedAt: new Date().toISOString()
+  };
+}
+
 async function saveDocument() {
   const tmp = `${stateFile}.tmp`;
   await writeFile(tmp, JSON.stringify(doc, null, 2), "utf8");
   await rename(tmp, stateFile);
+}
+
+async function saveArchiveDocument() {
+  const tmp = `${archiveStateFile}.tmp`;
+  await writeFile(tmp, JSON.stringify(archiveDoc, null, 2), "utf8");
+  await rename(tmp, archiveStateFile);
 }
 
 function sendJson(res, status, value) {
@@ -435,6 +473,50 @@ async function handlePresence(req, res, user) {
   }
 }
 
+async function handleArchiveSave(req, res, user) {
+  try {
+    const body = await readBody(req, 35 * 1024 * 1024);
+    touchClient(body, user);
+    const state = body.state;
+    if (!state || typeof state !== "object" || !Array.isArray(state.documents) || !Array.isArray(state.collections)) {
+      sendJson(res, 400, { ok: false, error: "Invalid archive state." });
+      return;
+    }
+    const baseRevision = Number(body.revision ?? body.baseRevision ?? 0);
+    if (baseRevision < archiveDoc.revision) {
+      sendJson(res, 409, {
+        ok: false,
+        reason: "conflict",
+        revision: archiveDoc.revision,
+        updatedAt: archiveDoc.updatedAt,
+        state: archiveDoc.state
+      });
+      return;
+    }
+    archiveDoc = {
+      revision: archiveDoc.revision + 1,
+      state,
+      updatedAt: new Date().toISOString()
+    };
+    archiveDoc.state.updatedAt = archiveDoc.updatedAt;
+    await saveArchiveDocument();
+    broadcast({ type: "archive-state", revision: archiveDoc.revision, clientId: body.clientId || "" });
+    broadcast({ type: "presence", presence: presencePayload() });
+    sendJson(res, 200, { ok: true, revision: archiveDoc.revision, updatedAt: archiveDoc.updatedAt });
+  } catch (err) {
+    sendJson(res, 400, { ok: false, error: err.message || "Archive save failed." });
+  }
+}
+
+function handleArchiveState(res) {
+  sendJson(res, 200, {
+    ok: true,
+    revision: archiveDoc.revision,
+    updatedAt: archiveDoc.updatedAt,
+    state: archiveDoc.state
+  });
+}
+
 function handleEvents(req, res, user) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   touchClient({
@@ -464,7 +546,8 @@ function handleEvents(req, res, user) {
 
 async function serveStatic(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
-  const rawPath = decodeURIComponent(url.pathname === "/" ? "/GDD/index.html" : url.pathname);
+  const pathname = url.pathname === "/" ? "/index.html" : (url.pathname.endsWith("/") ? `${url.pathname}index.html` : url.pathname);
+  const rawPath = decodeURIComponent(pathname);
   const filePath = normalize(join(rootDir, rawPath));
   if (!filePath.startsWith(rootDir) || relative(rootDir, filePath).startsWith("..")) {
     res.writeHead(403);
@@ -524,6 +607,18 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/api/collab/state") {
       sendJson(res, 200, { ok: true, revision: doc.revision, state: doc.state, presence: presencePayload() });
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/archive/state") {
+      handleArchiveState(res);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/archive/save") {
+      if (!canEdit(user)) {
+        forbidden(res);
+        return;
+      }
+      await handleArchiveSave(req, res, user);
       return;
     }
     if (req.method === "GET" && url.pathname === "/api/collab/events") {

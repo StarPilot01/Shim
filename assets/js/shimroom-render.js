@@ -376,6 +376,7 @@ function renderViewBlocksWithDataDrawers(tab, blocks) {
 }
 
 const CONTENT_INSERT_TYPES = ["text", "heading", "callout", "quote", "table", "checklist", "code", "divider", "flow", "mermaid", "drawing", "image", "video", "attachment"];
+const CONTENT_INSERT_HOST_TYPES = new Set(CONTENT_INSERT_TYPES);
 
 function renderBlockInsertLine(insertIndex) {
   return `
@@ -528,6 +529,10 @@ function renderWikiDetail(term) {
 function renderBlock(block, index, count, highlighted = false) {
   const canDrag = isEditing && !searchQuery;
   const canKeyword = ["heading", "text", "callout", "quote"].includes(block.type);
+  const blockBody = renderBlockBody(block);
+  const renderedBlockBody = canInsertContentIntoBlock(block)
+    ? renderSingleContentBlockBody(block.id, blockBody)
+    : blockBody;
   const copyIcon = `
     <svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true">
       <rect x="9" y="9" width="10" height="10" rx="2"></rect>
@@ -565,9 +570,13 @@ function renderBlock(block, index, count, highlighted = false) {
           <button class="icon danger" data-block-action="delete" aria-label="블록 삭제" title="삭제">${trashIcon}</button>
         </div>
       </div>
-      <div class="block-body">${renderBlockBody(block)}</div>
+      <div class="block-body">${renderedBlockBody}</div>
     </article>
   `;
+}
+
+function canInsertContentIntoBlock(block) {
+  return isEditing && block?.type !== "generic" && CONTENT_INSERT_HOST_TYPES.has(block?.type);
 }
 
 function labelForType(type) {
@@ -589,6 +598,16 @@ function renderContentInsertLine(blockId, insertIndex) {
           ${renderContentInsertButtons(blockId, insertIndex)}
         </div>
       </details>
+    </div>
+  `;
+}
+
+function renderSingleContentBlockBody(blockId, bodyHtml) {
+  return `
+    <div class="content-stack content-stack--single">
+      ${renderContentInsertLine(blockId, 0)}
+      <div class="content-unit-single">${bodyHtml}</div>
+      ${renderContentInsertLine(blockId, 1)}
     </div>
   `;
 }

@@ -1034,6 +1034,14 @@ body.wiki-view .editor-toolbar {
   gap: 0;
 }
 
+.content-stack--single {
+  gap: 0;
+}
+
+.content-unit-single {
+  min-width: 0;
+}
+
 .content-unit {
   position: relative;
   padding: 8px 42px 8px 12px;
@@ -1136,9 +1144,9 @@ body.content-unit-dragging {
 }
 
 .insert-line--content {
-  height: 14px;
+  height: 20px;
   margin: 0;
-  z-index: 8;
+  z-index: 16;
 }
 
 .insert-line--content:hover,
@@ -1147,7 +1155,8 @@ body.content-unit-dragging {
 }
 
 .content-insert-line {
-  height: 14px;
+  height: 20px;
+  z-index: 18;
 }
 
 .content-insert-line::before {
@@ -1168,11 +1177,33 @@ body.content-unit-dragging {
 .content-insert-line:hover,
 .content-insert-line:focus-within {
   margin: 2px 0;
+  z-index: 90;
+}
+
+.content-insert-line:has(.content-insert-menu[open]) {
+  opacity: 1;
+  z-index: 90;
+}
+
+.block:hover .content-stack > .content-insert-line,
+.block:focus-within .content-stack > .content-insert-line,
+.content-stack:hover > .content-insert-line,
+.content-stack:focus-within > .content-insert-line {
+  opacity: 0.72;
+}
+
+.content-stack > .content-insert-line:hover,
+.content-stack > .content-insert-line:focus-within {
+  opacity: 1;
 }
 
 .content-insert-menu {
   position: relative;
   z-index: 2;
+}
+
+.content-insert-menu[open] {
+  z-index: 92;
 }
 
 .content-insert-btn {
@@ -1212,7 +1243,7 @@ body.content-unit-dragging {
   position: absolute;
   top: calc(100% + 8px);
   left: 50%;
-  z-index: 80;
+  z-index: 120;
   display: grid;
   grid-template-columns: repeat(3, minmax(96px, 1fr));
   gap: 6px;
@@ -1223,6 +1254,11 @@ body.content-unit-dragging {
   background: #fff;
   box-shadow: 0 18px 42px rgba(31, 37, 33, 0.16);
   transform: translateX(-50%);
+}
+
+.content-stack > .content-insert-line:last-child .content-insert-panel {
+  top: auto;
+  bottom: calc(100% + 8px);
 }
 
 .content-insert-option {
