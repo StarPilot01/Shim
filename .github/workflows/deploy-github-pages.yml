@@ -29,7 +29,10 @@ jobs:
       - name: Prepare static site
         run: |
           mkdir -p site
-          cp -R index.html shimroom_plan_tool.html GDD assets shimroom_data_sheets.xlsx site/
+          cp -R index.html shimroom_plan_tool.html GDD assets site/
+          if [ -f "shimroom_data_sheets.xlsx" ]; then
+            cp "shimroom_data_sheets.xlsx" site/
+          fi
           if [ -f "쉼청년과_함께_쉼표의_방_통합_기획서_v2.docx" ]; then
             cp "쉼청년과_함께_쉼표의_방_통합_기획서_v2.docx" site/
           fi
