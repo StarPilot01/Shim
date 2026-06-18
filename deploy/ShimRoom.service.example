@@ -1,23 +1,23 @@
 [Unit]
-Description=Shim GDD collaboration server
+Description=ShimRoom collaboration server
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=chan
-WorkingDirectory=/home/chan/Shim
+WorkingDirectory=/home/chan/ShimRoom
 Environment=HOST=0.0.0.0
 Environment=PORT=8770
 Environment=MYSQL_HOST=127.0.0.1
 Environment=MYSQL_PORT=3306
 Environment=MYSQL_USER=shim_app
 Environment=MYSQL_PASSWORD=change-this-password
-Environment=MYSQL_DATABASE=shim_gdd
+Environment=MYSQL_DATABASE=ShimRoom
 Environment=SESSION_DAYS=14
 # Enable this only when serving through HTTPS.
 # Environment=COOKIE_SECURE=1
-ExecStart=/usr/bin/node /home/chan/Shim/collab-server.mjs
+ExecStart=/usr/bin/node /home/chan/ShimRoom/collab-server.mjs
 Restart=always
 RestartSec=3
 

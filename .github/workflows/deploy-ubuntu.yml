@@ -15,7 +15,7 @@ jobs:
     runs-on: [self-hosted, linux, shim-ubuntu]
     env:
       APP_DIR: ${{ secrets.UBUNTU_APP_DIR }}
-      SERVICE_NAME: ${{ secrets.UBUNTU_SERVICE_NAME || 'shim-gdd' }}
+      SERVICE_NAME: ${{ secrets.UBUNTU_SERVICE_NAME || 'ShimRoom' }}
 
     steps:
       - name: Checkout
@@ -34,9 +34,9 @@ jobs:
             --exclude='.collab' \
             --exclude='test-results' \
             --exclude='shimroom_test_runner.html' \
-            -czf /tmp/shim-deploy-${GITHUB_SHA}.tgz .
-          tar -xzf /tmp/shim-deploy-${GITHUB_SHA}.tgz -C "$APP_DIR"
-          rm -f /tmp/shim-deploy-${GITHUB_SHA}.tgz
+            -czf /tmp/ShimRoom-deploy-${GITHUB_SHA}.tgz .
+          tar -xzf /tmp/ShimRoom-deploy-${GITHUB_SHA}.tgz -C "$APP_DIR"
+          rm -f /tmp/ShimRoom-deploy-${GITHUB_SHA}.tgz
 
       - name: Install dependencies and restart
         run: |

@@ -301,7 +301,7 @@ function sendLoginPage(res, options = {}) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Shim 로그인</title>
+  <title>ShimRoom 로그인</title>
   <style>
     :root { color-scheme: light; font-family: Inter, Pretendard, system-ui, sans-serif; }
     body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: #f5f7fb; color: #172033; }
@@ -316,7 +316,7 @@ function sendLoginPage(res, options = {}) {
 </head>
 <body>
   <main>
-    <h1>Shim 로그인</h1>
+    <h1>ShimRoom 로그인</h1>
     <p>문서 서버에 접근하려면 로그인하세요.</p>
     ${error}
     <form method="post" action="/api/auth/login">
@@ -663,6 +663,6 @@ setInterval(() => {
 }, 10000);
 
 server.listen(port, host, () => {
-  console.log(`Shim collaboration server: http://${host}:${port}/GDD/index.html`);
+  console.log(`ShimRoom collaboration server: http://${host}:${port}/GDD/index.html`);
   console.log(`Authentication: ${authDisabled ? "disabled" : "MySQL"}`);
 });
