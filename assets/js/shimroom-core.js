@@ -11,6 +11,8 @@ let currentWikiKeyword = "";
 let saveTimer = null;
 let lastFocusedBlockId = "";
 let lastFocusedTableCell = { blockId: "", row: -1, col: -1, type: "" };
+let authUser = null;
+let authCanEdit = false;
 
 const BLOCK_DEFINITIONS = Object.freeze({
   generic: { label: "블록", create: () => ({ items: [createContentUnit("text")] }) },
@@ -797,15 +799,37 @@ function getCurrentTab() {
 }
 
 function setMode(editing) {
-  isEditing = Boolean(editing);
+  isEditing = Boolean(editing) && authCanEdit;
   document.body.classList.toggle("edit-mode", isEditing);
   document.body.classList.toggle("view-mode", !isEditing);
+  document.body.classList.toggle("auth-can-edit", authCanEdit);
+  document.body.classList.toggle("auth-readonly", !authCanEdit);
   document.body.classList.toggle("wiki-view", currentView === "wiki");
   els.modeBadge.textContent = isEditing ? "편집 모드" : "보기 모드";
   els.modeToggle.setAttribute("aria-pressed", String(isEditing));
+  els.modeToggle.classList.toggle("locked", !authCanEdit);
+  els.modeToggle.title = authCanEdit ? "보기/편집 모드 전환" : (authUser ? "편집 권한이 없습니다." : "편집하려면 로그인하세요.");
+  els.modeToggle.setAttribute("aria-label", els.modeToggle.title);
   if (els.appTitle) els.appTitle.readOnly = !isEditing;
   els.title.readOnly = !isEditing;
   els.subtitle.readOnly = !isEditing;
+}
+
+function setShimroomAuth(user, canEdit) {
+  authUser = user || null;
+  authCanEdit = Boolean(canEdit);
+  window.SHIMROOM_AUTH_USER = authUser;
+  window.SHIMROOM_AUTH_CAN_EDIT = authCanEdit;
+  if (!authCanEdit && isEditing) isEditing = false;
+  setMode(isEditing);
+}
+
+function canEnterEditMode() {
+  return authCanEdit;
+}
+
+function editLoginUrl() {
+  return `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
 }
 
 function editAttr() {

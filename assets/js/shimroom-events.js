@@ -2674,6 +2674,15 @@ els.wikiKeywordList?.addEventListener("click", event => {
   if (button) openTermPage(button.dataset.wikiTerm);
 });
 document.getElementById("modeToggle").addEventListener("click", () => {
+  if (!isEditing && typeof canEnterEditMode === "function" && !canEnterEditMode()) {
+    if (window.SHIMROOM_AUTH_USER) {
+      toast("편집 권한이 없습니다.");
+    } else {
+      toast("편집하려면 로그인하세요.");
+      location.href = typeof editLoginUrl === "function" ? editLoginUrl() : `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
+    }
+    return;
+  }
   if (isEditing) {
     CommandManager.commitDraft({ render: false });
     saveNow();

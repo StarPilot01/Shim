@@ -214,6 +214,10 @@ function canEdit(user) {
   return user && (user.role === "admin" || user.role === "editor");
 }
 
+function publicUserPayload(user) {
+  return { ok: true, user: user || null, canEdit: Boolean(canEdit(user)) };
+}
+
 function authRequired(req, res, url) {
   if (wantsJson(req) || isApiRequest(req)) {
     sendJson(res, 401, { ok: false, reason: "auth_required" });
@@ -590,18 +594,12 @@ const server = createServer(async (req, res) => {
     const user = await currentUser(req);
 
     if (req.method === "GET" && url.pathname === "/api/auth/me") {
-      if (!user) authRequired(req, res, url);
-      else sendJson(res, 200, { ok: true, user });
+      sendJson(res, 200, publicUserPayload(user));
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/api/auth/logout") {
       await handleLogout(req, res);
-      return;
-    }
-
-    if (!user) {
-      authRequired(req, res, url);
       return;
     }
 
@@ -613,6 +611,24 @@ const server = createServer(async (req, res) => {
       handleArchiveState(res);
       return;
     }
+    if (req.method === "GET" && url.pathname === "/api/collab/events") {
+      handleEvents(req, res, user);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/collab/presence") {
+      await handlePresence(req, res, user);
+      return;
+    }
+    if ((req.method === "GET" || req.method === "HEAD") && !url.pathname.startsWith("/api/")) {
+      await serveStatic(req, res);
+      return;
+    }
+
+    if (!user) {
+      authRequired(req, res, url);
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/archive/save") {
       if (!canEdit(user)) {
         forbidden(res);
@@ -621,24 +637,12 @@ const server = createServer(async (req, res) => {
       await handleArchiveSave(req, res, user);
       return;
     }
-    if (req.method === "GET" && url.pathname === "/api/collab/events") {
-      handleEvents(req, res, user);
-      return;
-    }
     if (req.method === "POST" && url.pathname === "/api/collab/patch") {
       if (!canEdit(user)) {
         forbidden(res);
         return;
       }
       await handlePatch(req, res, user);
-      return;
-    }
-    if (req.method === "POST" && url.pathname === "/api/collab/presence") {
-      await handlePresence(req, res, user);
-      return;
-    }
-    if (req.method === "GET" || req.method === "HEAD") {
-      await serveStatic(req, res);
       return;
     }
     res.writeHead(405);

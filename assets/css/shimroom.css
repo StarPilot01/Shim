@@ -250,6 +250,15 @@ body.view-mode .brand-title-input {
   transition: transform 0.18s ease, background 0.18s ease;
 }
 
+.mode-toggle.locked {
+  border-color: #d6c8bb;
+  background: #f6f0ea;
+}
+
+.mode-toggle.locked::before {
+  background: #fff8ef;
+}
+
 body.edit-mode .mode-toggle::before {
   transform: translateX(100%);
   background: #2f6f5e;
@@ -348,6 +357,17 @@ body.edit-mode .mode-option.edit {
   padding: 3px 8px;
   border-radius: 999px;
   font-size: 12px;
+}
+
+.auth-login {
+  min-height: 24px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .command-controls {
