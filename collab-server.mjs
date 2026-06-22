@@ -245,16 +245,26 @@ function loginErrorMessage(code) {
   return code === "invalid" ? "아이디 또는 비밀번호를 확인해주세요." : "";
 }
 
+function loginPasswordCandidates(password) {
+  const raw = String(password || "");
+  return [...new Set([
+    raw,
+    raw.trim().normalize("NFC"),
+    raw.trim().normalize("NFKC"),
+    raw.replace(/[\s\u200B-\u200D\uFEFF]+/gu, "").normalize("NFKC")
+  ])].filter(Boolean);
+}
+
 async function handleLogin(req, res) {
   try {
     const body = await readFormBody(req, 64 * 1024);
     const username = String(body.username || "").trim();
     const rawPassword = String(body.password || "");
     const next = sanitizeNext(body.next);
-    let user = await authStore.verifyCredentials(username, rawPassword);
-    const normalizedPassword = rawPassword.trim().normalize("NFC");
-    if (!user && normalizedPassword !== rawPassword) {
-      user = await authStore.verifyCredentials(username, normalizedPassword);
+    let user = null;
+    for (const password of loginPasswordCandidates(rawPassword)) {
+      user = await authStore.verifyCredentials(username, password);
+      if (user) break;
     }
 
     if (!user) {
@@ -331,6 +341,8 @@ function sendLoginPage(res, options = {}) {
     input { width: 100%; box-sizing: border-box; border: 1px solid #c9d1df; border-radius: 6px; padding: 11px 12px; font: inherit; }
     button { width: 100%; margin-top: 20px; border: 0; border-radius: 6px; padding: 12px 14px; background: #2057a7; color: #fff; font: inherit; font-weight: 800; cursor: pointer; }
     .error { padding: 10px 12px; border-radius: 6px; background: #fff1f1; color: #9b1c1c; font-size: 13px; }
+    .show-password { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-weight: 600; }
+    .show-password input { width: auto; }
   </style>
 </head>
 <body>
@@ -341,14 +353,23 @@ function sendLoginPage(res, options = {}) {
     <form method="post" action="/login">
       <input type="hidden" name="next" value="${next}">
       <label>아이디
-        <input name="username" autocomplete="username" required autofocus>
+        <input name="username" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" required autofocus>
       </label>
       <label>비밀번호
-        <input name="password" type="password" autocomplete="current-password" required>
+        <input id="passwordInput" name="password" type="password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false" required>
+      </label>
+      <label class="show-password">
+        <input id="showPassword" type="checkbox">
+        비밀번호 보기
       </label>
       <button type="submit">로그인</button>
     </form>
   </main>
+  <script>
+    document.getElementById("showPassword").addEventListener("change", event => {
+      document.getElementById("passwordInput").type = event.target.checked ? "text" : "password";
+    });
+  </script>
 </body>
 </html>`);
 }
