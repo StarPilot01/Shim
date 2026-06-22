@@ -245,9 +245,13 @@ async function handleLogin(req, res) {
   try {
     const body = await readFormBody(req, 64 * 1024);
     const username = String(body.username || "").trim();
-    const password = String(body.password || "");
+    const rawPassword = String(body.password || "");
     const next = sanitizeNext(body.next);
-    const user = await authStore.verifyCredentials(username, password);
+    let user = await authStore.verifyCredentials(username, rawPassword);
+    const normalizedPassword = rawPassword.trim().normalize("NFC");
+    if (!user && normalizedPassword !== rawPassword) {
+      user = await authStore.verifyCredentials(username, normalizedPassword);
+    }
 
     if (!user) {
       if (wantsJson(req)) {
