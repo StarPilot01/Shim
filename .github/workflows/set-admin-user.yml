@@ -34,4 +34,50 @@ jobs:
             esac
           done
 
-          npm run user:create -- admin admin admin
+          node --input-type=module <<'NODE'
+          import { randomBytes, scryptSync } from "node:crypto";
+          import { createMysqlPoolFromEnv, ensureAuthSchema } from "./server/mysql-auth.mjs";
+
+          const PASSWORD_ALGO = "scrypt";
+          const PASSWORD_PARAMS = {
+            N: 32768,
+            r: 8,
+            p: 1,
+            keylen: 64,
+            maxmem: 64 * 1024 * 1024
+          };
+
+          const password = String(process.env.SHIM_PASSWORD || "");
+          if (!password) throw new Error("Missing admin password.");
+
+          const salt = randomBytes(16).toString("base64url");
+          const hash = scryptSync(password, salt, PASSWORD_PARAMS.keylen, PASSWORD_PARAMS).toString("base64url");
+          const passwordHash = [
+            PASSWORD_ALGO,
+            PASSWORD_PARAMS.N,
+            PASSWORD_PARAMS.r,
+            PASSWORD_PARAMS.p,
+            salt,
+            hash
+          ].join("$");
+
+          const pool = createMysqlPoolFromEnv(process.env);
+          try {
+            await ensureAuthSchema(pool);
+            await pool.execute(
+              `
+                INSERT INTO users (username, display_name, password_hash, role)
+                VALUES (?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                  display_name = VALUES(display_name),
+                  password_hash = VALUES(password_hash),
+                  role = VALUES(role),
+                  disabled_at = NULL
+              `,
+              ["admin", "admin", passwordHash, "admin"]
+            );
+            console.log("User ready: admin (admin)");
+          } finally {
+            await pool.end();
+          }
+          NODE
