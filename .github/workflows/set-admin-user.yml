@@ -1,0 +1,37 @@
+name: Set ShimRoom Admin User
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  set-admin-user:
+    runs-on: [self-hosted, linux, shim-ubuntu]
+    env:
+      APP_DIR: ${{ secrets.UBUNTU_APP_DIR }}
+      SERVICE_NAME: ${{ secrets.UBUNTU_SERVICE_NAME || 'ShimRoom' }}
+      SHIM_PASSWORD: ${{ secrets.SHIMROOM_ADMIN_PASSWORD }}
+
+    steps:
+      - name: Validate inputs
+        run: |
+          test -n "$APP_DIR" || (echo "Missing UBUNTU_APP_DIR" && exit 1)
+          test -n "$SHIM_PASSWORD" || (echo "Missing SHIMROOM_ADMIN_PASSWORD" && exit 1)
+
+      - name: Upsert admin user
+        run: |
+          set -euo pipefail
+          cd "$APP_DIR"
+
+          service_env="$(systemctl show "$SERVICE_NAME" --property=Environment --value)"
+          for item in $service_env; do
+            case "$item" in
+              DATABASE_URL=*|MYSQL_HOST=*|MYSQL_PORT=*|MYSQL_USER=*|MYSQL_PASSWORD=*|MYSQL_DATABASE=*)
+                export "$item"
+                ;;
+            esac
+          done
+
+          npm run user:create -- admin admin admin
