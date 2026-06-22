@@ -30,6 +30,11 @@ jobs:
         run: |
           mkdir -p site
           cp -R index.html shimroom_plan_tool.html GDD assets site/
+          rm -rf site/assets/notion-media
+          rm -f \
+            site/assets/data/notion-archive-data.js \
+            site/assets/js/notion-hub.js \
+            site/assets/css/notion-hub.css
           if [ -f "shimroom_data_sheets.xlsx" ]; then
             cp "shimroom_data_sheets.xlsx" site/
           fi

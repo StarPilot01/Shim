@@ -28,10 +28,22 @@ jobs:
       - name: Deploy files
         run: |
           mkdir -p "$APP_DIR"
+          rm -rf \
+            "$APP_DIR/Archive" \
+            "$APP_DIR/assets/notion-media"
+          rm -f \
+            "$APP_DIR/assets/data/notion-archive-data.js" \
+            "$APP_DIR/assets/js/notion-hub.js" \
+            "$APP_DIR/assets/css/notion-hub.css"
           tar \
             --exclude='.git' \
             --exclude='node_modules' \
             --exclude='.collab' \
+            --exclude='Archive' \
+            --exclude='assets/notion-media' \
+            --exclude='assets/data/notion-archive-data.js' \
+            --exclude='assets/js/notion-hub.js' \
+            --exclude='assets/css/notion-hub.css' \
             --exclude='test-results' \
             --exclude='shimroom_test_runner.html' \
             -czf /tmp/ShimRoom-deploy-${GITHUB_SHA}.tgz .

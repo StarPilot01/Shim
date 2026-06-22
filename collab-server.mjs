@@ -15,6 +15,7 @@ const port = Number(process.env.PORT || process.argv[2] || 8770);
 const host = process.env.HOST || process.argv[3] || "127.0.0.1";
 const cookieName = process.env.SESSION_COOKIE || "shim_session";
 const authDisabled = process.env.AUTH_DISABLED === "1";
+const archiveHostingEnabled = process.env.ARCHIVE_HOSTING_ENABLED === "1";
 const sessionDays = Number(process.env.SESSION_DAYS || 14);
 const sessionMaxAgeMs = Math.max(1, sessionDays) * 24 * 60 * 60 * 1000;
 const clients = new Map();
@@ -36,7 +37,7 @@ const mimeTypes = {
 };
 
 let doc = await loadDocument();
-let archiveDoc = await loadArchiveDocument();
+let archiveDoc = archiveHostingEnabled ? await loadArchiveDocument() : null;
 let authStore = null;
 
 if (!authDisabled) {
@@ -197,6 +198,16 @@ function wantsJson(req) {
 
 function isApiRequest(req) {
   return String(req.url || "").startsWith("/api/");
+}
+
+function isLegacyArchivePath(pathname) {
+  return pathname === "/Archive"
+    || pathname === "/Archive/"
+    || pathname.startsWith("/Archive/")
+    || pathname === "/assets/data/notion-archive-data.js"
+    || pathname.startsWith("/assets/notion-media/")
+    || pathname === "/assets/js/notion-hub.js"
+    || pathname === "/assets/css/notion-hub.css";
 }
 
 function getSessionToken(req) {
@@ -550,6 +561,11 @@ function handleEvents(req, res, user) {
 
 async function serveStatic(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
+  if (!archiveHostingEnabled && isLegacyArchivePath(url.pathname)) {
+    res.writeHead(404, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+    res.end("Not found");
+    return;
+  }
   const pathname = url.pathname === "/" ? "/index.html" : (url.pathname.endsWith("/") ? `${url.pathname}index.html` : url.pathname);
   const rawPath = decodeURIComponent(pathname);
   const filePath = normalize(join(rootDir, rawPath));
@@ -579,6 +595,11 @@ const server = createServer(async (req, res) => {
       const user = await currentUser(req);
       if (user) redirect(res, sanitizeNext(url.searchParams.get("next")), 302);
       else sendLoginPage(res, { next: url.searchParams.get("next") });
+      return;
+    }
+
+    if (!archiveHostingEnabled && url.pathname.startsWith("/api/archive/")) {
+      sendJson(res, 404, { ok: false, reason: "not_found" });
       return;
     }
 
