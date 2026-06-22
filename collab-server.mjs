@@ -241,6 +241,10 @@ function forbidden(res) {
   sendJson(res, 403, { ok: false, reason: "forbidden" });
 }
 
+function loginErrorMessage(code) {
+  return code === "invalid" ? "아이디 또는 비밀번호를 확인해주세요." : "";
+}
+
 async function handleLogin(req, res) {
   try {
     const body = await readFormBody(req, 64 * 1024);
@@ -257,7 +261,7 @@ async function handleLogin(req, res) {
       if (wantsJson(req)) {
         sendJson(res, 401, { ok: false, reason: "invalid_credentials" });
       } else {
-        sendLoginPage(res, { next, error: "아이디 또는 비밀번호를 확인해주세요." });
+        redirect(res, `/login?next=${encodeURIComponent(next)}&error=invalid`, 303);
       }
       return;
     }
@@ -334,7 +338,7 @@ function sendLoginPage(res, options = {}) {
     <h1>ShimRoom 로그인</h1>
     <p>문서 서버에 접근하려면 로그인하세요.</p>
     ${error}
-    <form method="post" action="/api/auth/login">
+    <form method="post" action="/login">
       <input type="hidden" name="next" value="${next}">
       <label>아이디
         <input name="username" autocomplete="username" required autofocus>
@@ -598,7 +602,15 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/login") {
       const user = await currentUser(req);
       if (user) redirect(res, sanitizeNext(url.searchParams.get("next")), 302);
-      else sendLoginPage(res, { next: url.searchParams.get("next") });
+      else sendLoginPage(res, {
+        next: url.searchParams.get("next"),
+        error: loginErrorMessage(url.searchParams.get("error"))
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/auth/login") {
+      redirect(res, `/login?next=${encodeURIComponent(sanitizeNext(url.searchParams.get("next")))}`, 302);
       return;
     }
 
@@ -607,7 +619,7 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/api/auth/login") {
+    if (req.method === "POST" && (url.pathname === "/login" || url.pathname === "/api/auth/login")) {
       if (authDisabled) {
         redirect(res, sanitizeNext(url.searchParams.get("next")), 303);
       } else {
